@@ -130,8 +130,8 @@ def app_table():
 
 
 def pkg_size():
-    pkgs = sorted((ROOT / "dist").glob("mide-*.pkg"))
-    return f"{pkgs[0].stat().st_size / 1e6:.1f} MB" if pkgs else "about 6 MB"
+    # Fixed text: dist/ is gitignored, so reading it made docs/ differ between machines and CI.
+    return "about 6 MB"
 
 
 SUBS = {

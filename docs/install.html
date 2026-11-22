@@ -48,7 +48,7 @@
 
 <h2 id="install-with-the-package">Install with the package</h2>
 <ol>
-  <li>Download <code>mide-0.1.0-arm64.pkg</code> (or the <code>universal</code> one) from the <a href="https://github.com/kmr-rohi/mide/releases/latest">latest release</a>.</li>
+  <li>Download <code>mide-0.1.0-arm64.pkg</code> (or the <code>universal</code> one) from the <a href="https://github.com/kmr-rohit/mide/releases/latest">latest release</a>.</li>
   <li>Open it and follow the installer. It puts <strong>mide.app</strong> in <code>/Applications</code> and adds a <code>mide</code> command to <code>/usr/local/bin</code>.</li>
   <li>Open mide from Applications, or run <code>mide .</code> in a project folder.</li>
 </ol>
@@ -79,7 +79,7 @@ mide notes.md         # open a file (and its folder)</code></pre>
 <h2 id="build-from-source">Build from source</h2>
 <p>You need the Rust toolchain and the full Xcode app (not just the command line tools), because the GPU interface compiles Metal shaders.</p>
 <pre><code>xcodebuild -downloadComponent MetalToolchain   # once, after installing Xcode
-git clone https://github.com/kmr-rohi/mide.git
+git clone https://github.com/kmr-rohit/mide.git
 cd mide
 cargo run --release -p mide -- .</code></pre>
 <p>Build the app bundle or the installer yourself:</p>
@@ -99,10 +99,10 @@ rm -rf ~/.config/mide      # optional: settings, recent folders, trusted folders
   <div class="wrap">
     <p>mide is open source under the MIT license. It is an independent project, not affiliated with Sublime HQ, Zed, GitHub or Anthropic.</p>
     <nav aria-label="Footer">
-      <a href="https://github.com/kmr-rohi/mide">Source on GitHub</a>
-      <a href="https://github.com/kmr-rohi/mide/releases">Releases</a>
-      <a href="https://github.com/kmr-rohi/mide/issues">Report a problem</a>
-      <a href="https://github.com/kmr-rohi/mide/blob/main/LICENSE">License</a>
+      <a href="https://github.com/kmr-rohit/mide">Source on GitHub</a>
+      <a href="https://github.com/kmr-rohit/mide/releases">Releases</a>
+      <a href="https://github.com/kmr-rohit/mide/issues">Report a problem</a>
+      <a href="https://github.com/kmr-rohit/mide/blob/main/LICENSE">License</a>
     </nav>
   </div>
 </footer>

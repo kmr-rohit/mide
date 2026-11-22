@@ -158,11 +158,13 @@ fn a_far_jump_is_instant_and_matches_the_exact_result_for_ordinary_code() {
     let (s, t, n) = setup("Rust");
     let doc = many_lines(8000);
 
-    let started = std::time::Instant::now();
     let mut h = DocHighlighter::new(s.clone(), t.clone(), &n);
+    // Timed after construction: building the highlighter compiles grammars, which is slow in debug builds on CI.
+    let started = std::time::Instant::now();
     let far = h.highlight_window(7000, 30, |i| doc[i].clone());
+    let took = started.elapsed();
     assert!(far.approximate, "7000 lines past anything parsed must not be parsed in full");
-    assert!(started.elapsed() < std::time::Duration::from_millis(500), "took {:?}", started.elapsed());
+    assert!(took < std::time::Duration::from_millis(500), "took {took:?}");
     assert_eq!(far.lines.len(), 30);
 
     // Plain code has no multi-line state, so the shortcut agrees with the full parse.

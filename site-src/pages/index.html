@@ -102,7 +102,8 @@
 <section class="section band">
   <div class="wrap">
     <h2>Install in a minute.</h2>
-    <p class="intro">Download the installer, open it, then start from any terminal.</p>
+    <p class="intro">One command installs it on Apple Silicon or Intel, then start from any terminal.</p>
+    <pre><code>curl -fsSL -o /tmp/mide.pkg https://github.com/{{repo}}/releases/latest/download/mide-{{version}}-universal.pkg && sudo installer -pkg /tmp/mide.pkg -target /</code></pre>
     <pre data-nocopy><code>mide ~/code/my-project</code></pre>
     <div class="actions">
       <a class="btn" href="https://github.com/{{repo}}/releases/latest">Download for macOS</a>

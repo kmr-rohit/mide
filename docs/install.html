@@ -36,7 +36,7 @@
   </div>
 </header>
 <main id="main">
-<div class="wrap page"><aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><ul><li><a href="#requirements">Requirements</a></li><li><a href="#install-with-the-package">Install with the package</a></li><li><a href="#first-launch">First launch</a></li><li><a href="#the-mide-command">The mide command</a></li><li><a href="#build-from-source">Build from source</a></li><li><a href="#update">Update</a></li><li><a href="#uninstall">Uninstall</a></li></ul></aside><article class="prose"><h1>Install mide</h1>
+<div class="wrap page"><aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><ul><li><a href="#requirements">Requirements</a></li><li><a href="#install-from-the-terminal">Install from the terminal</a></li><li><a href="#install-with-the-package">Install with the package</a></li><li><a href="#first-launch">First launch</a></li><li><a href="#the-mide-command">The mide command</a></li><li><a href="#build-from-source">Build from source</a></li><li><a href="#update">Update</a></li><li><a href="#uninstall">Uninstall</a></li></ul></aside><article class="prose"><h1>Install mide</h1>
 <p class="lead">A macOS installer, or build it yourself in a few commands.</p>
 
 <h2 id="requirements">Requirements</h2>
@@ -45,6 +45,11 @@
   <li>Apple Silicon for the <code>arm64</code> package. For an Intel Mac, use the <code>universal</code> package if the release lists one, or build from source.</li>
   <li><code>git</code> on your PATH for the git window (it comes with the Xcode command line tools).</li>
 </ul>
+
+<h2 id="install-from-the-terminal">Install from the terminal</h2>
+<p>The quickest way, on Apple Silicon or Intel. It downloads the universal package and installs it; macOS does not show the unverified-developer warning for packages installed this way.</p>
+<pre><code>curl -fsSL -o /tmp/mide.pkg https://github.com/kmr-rohit/mide/releases/latest/download/mide-0.1.0-universal.pkg && sudo installer -pkg /tmp/mide.pkg -target /</code></pre>
+<p>Then run <code>mide .</code> in a project folder.</p>
 
 <h2 id="install-with-the-package">Install with the package</h2>
 <ol>
@@ -61,11 +66,12 @@
 <div class="callout">
   <p>mide is not yet notarized by Apple, so Gatekeeper shows an "unidentified developer" warning the first time. This is expected for an independent open-source app, and it is safe to continue if you downloaded the installer from this project's release page.</p>
 </div>
+<p>If you see <strong>"mide-0.1.0-arm64.pkg" Not Opened</strong> with only <strong>Move to Trash</strong> and <strong>Done</strong>, choose <strong>Done</strong>, then either:</p>
 <ul>
-  <li>Control-click (or right-click) the <code>.pkg</code>, choose <strong>Open</strong>, then <strong>Open</strong> again; or</li>
-  <li>open <strong>System Settings, Privacy &amp; Security</strong>, scroll down and choose <strong>Open Anyway</strong>; or</li>
-  <li>remove the download flag from the terminal: <code>xattr -d com.apple.quarantine mide-0.1.0-arm64.pkg</code></li>
+  <li>open <strong>System Settings, Privacy &amp; Security</strong>, scroll down to the message about the package and choose <strong>Open Anyway</strong>, then confirm; or</li>
+  <li>remove the download flag from the terminal and open it again: <code>xattr -d com.apple.quarantine ~/Downloads/mide-0.1.0-arm64.pkg</code></li>
 </ul>
+<p>On macOS 15 (Sequoia) and later, Control-click and <strong>Open</strong> no longer skips this check; use one of the steps above, or the <a href="#install-from-the-terminal">terminal install</a>.</p>
 
 <h2 id="first-launch">First launch</h2>
 <p>You get a welcome screen with <strong>Open Folder</strong> and your recent folders. Press <kbd>⌘</kbd><kbd>O</kbd> to pick a project. If it is a git repository, its history is ready in the background and <kbd>⌃</kbd><kbd>⇧</kbd><kbd>G</kbd> shows it. Press <kbd>⌃</kbd><kbd>`</kbd> for a terminal. The <a href="guide.html">guide</a> covers the rest.</p>

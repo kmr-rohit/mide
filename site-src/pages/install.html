@@ -10,6 +10,11 @@
   <li><code>git</code> on your PATH for the git window (it comes with the Xcode command line tools).</li>
 </ul>
 
+<h2>Install from the terminal</h2>
+<p>The quickest way, on Apple Silicon or Intel. It downloads the universal package and installs it; macOS does not show the unverified-developer warning for packages installed this way.</p>
+<pre><code>curl -fsSL -o /tmp/mide.pkg https://github.com/{{repo}}/releases/latest/download/mide-{{version}}-universal.pkg && sudo installer -pkg /tmp/mide.pkg -target /</code></pre>
+<p>Then run <code>mide .</code> in a project folder.</p>
+
 <h2>Install with the package</h2>
 <ol>
   <li>Download <code>mide-{{version}}-arm64.pkg</code> (or the <code>universal</code> one) from the <a href="https://github.com/{{repo}}/releases/latest">latest release</a>.</li>
@@ -25,11 +30,12 @@
 <div class="callout">
   <p>mide is not yet notarized by Apple, so Gatekeeper shows an "unidentified developer" warning the first time. This is expected for an independent open-source app, and it is safe to continue if you downloaded the installer from this project's release page.</p>
 </div>
+<p>If you see <strong>"mide-{{version}}-arm64.pkg" Not Opened</strong> with only <strong>Move to Trash</strong> and <strong>Done</strong>, choose <strong>Done</strong>, then either:</p>
 <ul>
-  <li>Control-click (or right-click) the <code>.pkg</code>, choose <strong>Open</strong>, then <strong>Open</strong> again; or</li>
-  <li>open <strong>System Settings, Privacy &amp; Security</strong>, scroll down and choose <strong>Open Anyway</strong>; or</li>
-  <li>remove the download flag from the terminal: <code>xattr -d com.apple.quarantine mide-{{version}}-arm64.pkg</code></li>
+  <li>open <strong>System Settings, Privacy &amp; Security</strong>, scroll down to the message about the package and choose <strong>Open Anyway</strong>, then confirm; or</li>
+  <li>remove the download flag from the terminal and open it again: <code>xattr -d com.apple.quarantine ~/Downloads/mide-{{version}}-arm64.pkg</code></li>
 </ul>
+<p>On macOS 15 (Sequoia) and later, Control-click and <strong>Open</strong> no longer skips this check; use one of the steps above, or the <a href="#install-from-the-terminal">terminal install</a>.</p>
 
 <h2>First launch</h2>
 <p>You get a welcome screen with <strong>Open Folder</strong> and your recent folders. Press <kbd>⌘</kbd><kbd>O</kbd> to pick a project. If it is a git repository, its history is ready in the background and <kbd>⌃</kbd><kbd>⇧</kbd><kbd>G</kbd> shows it. Press <kbd>⌃</kbd><kbd>`</kbd> for a terminal. The <a href="guide.html">guide</a> covers the rest.</p>

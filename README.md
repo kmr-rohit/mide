@@ -37,13 +37,14 @@ Measured on one Apple Silicon Mac with a release build. Every number is reproduc
 
 ## Install
 
-Download the `.pkg` from the [latest release](https://github.com/kmr-rohit/mide/releases/latest), open it, then:
+On Apple Silicon or Intel, from a terminal:
 
 ```sh
+curl -fsSL -o /tmp/mide.pkg https://github.com/kmr-rohit/mide/releases/latest/download/mide-0.1.0-universal.pkg && sudo installer -pkg /tmp/mide.pkg -target /
 mide ~/code/my-project
 ```
 
-The first time, macOS may warn that the installer is from an unidentified developer (it is not yet notarized); the [install guide](https://kmr-rohit.github.io/mide/install.html) shows how to continue.
+Or download the `.pkg` from the [latest release](https://github.com/kmr-rohit/mide/releases/latest) and open it. It is not yet notarized, so macOS says it "could not verify" the package: choose **Done**, then **System Settings → Privacy & Security → Open Anyway**. The [install guide](https://kmr-rohit.github.io/mide/install.html) has the details.
 
 ## Build from source
 

@@ -1,0 +1,13 @@
+# build output and local packaging
+target/
+dist/
+.DS_Store
+
+# Personal: screenshots of your own projects used as design reference. Never publish these.
+reference/
+
+# Machine-specific: points builds at one particular Xcode. See README ("Building").
+.cargo/
+
+# Python caches from the site and licence scripts
+__pycache__/

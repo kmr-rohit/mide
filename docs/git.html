@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Git window, mide</title>
+<meta name="description" content="Browse history with a commit graph and side-by-side diffs, and stage, commit, push, pull, branch and stash from the same window in mide.">
+<meta name="color-scheme" content="dark light">
+<meta property="og:title" content="Git window, mide">
+<meta property="og:description" content="Browse history with a commit graph and side-by-side diffs, and stage, commit, push, pull, branch and stash from the same window in mide.">
+<meta property="og:type" content="website">
+<link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
+<link rel="apple-touch-icon" href="assets/icon-180.png">
+<link rel="stylesheet" href="assets/style.css">
+<script>
+  // Apply the saved theme before first paint so there is no flash.
+  try { var t = localStorage.getItem('mide-theme'); if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t); } catch (e) {}
+</script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="site-head">
+  <div class="wrap">
+    <a class="brand" href="index.html"><img src="assets/icon-64.png" alt="" width="32" height="32">mide</a>
+    <nav class="nav" aria-label="Main">
+      <a href="install.html">Install</a>
+      <a href="guide.html">Guide</a>
+      <a href="terminal.html">Terminal</a>
+      <a href="git.html" aria-current="page">Git</a>
+      <a href="configuration.html">Configuration</a>
+      <a href="performance.html">Performance</a>
+      <a href="architecture.html">Architecture</a>
+      <a href="roadmap.html">Roadmap</a>
+      <button id="theme-toggle" type="button">Light theme</button>
+    </nav>
+  </div>
+</header>
+<main id="main">
+<div class="wrap page"><aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><ul><li><a href="#open-it">Open it</a></li><li><a href="#layout">Layout</a></li><li><a href="#toolbar">Toolbar</a></li><li><a href="#committing">Committing</a></li><li><a href="#working-with-a-commit">Working with a commit</a></li><li><a href="#what-it-does-not-do-yet">What it does not do yet</a></li></ul></aside><article class="prose"><h1>Git</h1>
+<p class="lead">History, diffs and the everyday git actions in one window.</p>
+
+<h2 id="open-it">Open it</h2>
+<p>Press <kbd>⌃</kbd><kbd>⇧</kbd><kbd>G</kbd>, or click the git text at the bottom left. <kbd>Esc</kbd> brings your editor back. When you open a folder that is a repository, its history loads in the background, so the window is ready when you ask for it.</p>
+
+<h2 id="layout">Layout</h2>
+<div class="table-wrap"><table>
+<thead><tr><th scope="col">Area</th><th scope="col">What is in it</th></tr></thead>
+<tbody>
+<tr><td>Locations (left)</td><td>Branches, remotes, tags, stashes, submodules and worktrees with counts. Click a branch or tag to find its commit; <strong>double-click a branch</strong> to switch to it.</td></tr>
+<tr><td>Commits (middle)</td><td>A colored graph rail showing merges and forks, the subject, author, date and branch or tag badges. Use <kbd>↑</kbd> <kbd>↓</kbd> <kbd>PgUp</kbd> <kbd>PgDn</kbd> <kbd>Home</kbd> <kbd>End</kbd> to move.</td></tr>
+<tr><td>Details (right)</td><td>Hash, author, date, parents, the full message, and every changed file as a side-by-side diff with the changed characters highlighted. Click a file name to open it in the editor.</td></tr>
+</tbody></table></div>
+<p>Drag the dividers between the columns to resize them.</p>
+
+<h2 id="toolbar">Toolbar</h2>
+<p>Commit, Pull, Push, Fetch, Branch, Stash and Pop Stash sit across the top, with the current branch and how far ahead or behind it is. Operations run the real <code>git</code> program in the background, so your credential helper, SSH agent and hooks work exactly as they do in a terminal. The result, or git's error message, appears in a banner. Only one operation runs at a time.</p>
+
+<h2 id="committing">Committing</h2>
+<p>When the working tree has changes, the first row in the list reads "N uncommitted changes". Select it to see the working copy:</p>
+<ul>
+  <li><strong>Stage, Unstage and Discard</strong> per file, and <strong>Stage all</strong> or <strong>Unstage all</strong>. Discarding asks you to confirm.</li>
+  <li>A commit message box. Press <kbd>⌘</kbd><kbd>↩</kbd> to commit.</li>
+  <li><strong>Amend last commit</strong>, which fills the box with the previous message.</li>
+  <li>If nothing is staged but there are changes, mide offers to stage everything and commit.</li>
+</ul>
+
+<h2 id="working-with-a-commit">Working with a commit</h2>
+<p>Select any commit for these actions: <strong>Checkout</strong> (detached), <strong>New Branch</strong> from that commit, <strong>Cherry-pick</strong>, <strong>Revert</strong> and <strong>Copy Hash</strong>. Cherry-pick and revert are not offered for merge commits.</p>
+
+<h2 id="what-it-does-not-do-yet">What it does not do yet</h2>
+<ul>
+  <li>Staging is per file; there is no hunk or line staging.</li>
+  <li>No merge-conflict resolution screen, rebase, tag creation or branch deletion.</li>
+  <li>History shows the newest 2,000 commits, with no search or filter.</li>
+  <li>No change markers in the editor gutter and no blame.</li>
+  <li>An SSH key with a passphrase and no agent cannot prompt for the passphrase; use an agent or a credential helper.</li>
+</ul>
+<p>See the <a href="roadmap.html">roadmap</a> for what is planned.</p>
+</article></div>
+</main>
+<footer class="site-foot">
+  <div class="wrap">
+    <p>mide is open source under the MIT license. It is an independent project, not affiliated with Sublime HQ, Zed, GitHub or Anthropic.</p>
+    <nav aria-label="Footer">
+      <a href="https://github.com/kmr-rohi/mide">Source on GitHub</a>
+      <a href="https://github.com/kmr-rohi/mide/releases">Releases</a>
+      <a href="https://github.com/kmr-rohi/mide/issues">Report a problem</a>
+      <a href="https://github.com/kmr-rohi/mide/blob/main/LICENSE">License</a>
+    </nav>
+  </div>
+</footer>
+<script src="assets/site.js" defer></script>
+</body>
+</html>

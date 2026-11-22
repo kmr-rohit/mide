@@ -1,0 +1,10 @@
+#!/bin/sh
+# mide: open a folder or file in the mide app.   Usage: mide [folder-or-file]
+SELF="$0"
+while [ -L "$SELF" ]; do SELF="$(readlink "$SELF")"; done
+APP="$(cd "$(dirname "$SELF")/../.." && pwd)"
+if [ -n "$1" ]; then
+    DIR="$(cd "$(dirname "$1")" 2>/dev/null && pwd)" || { echo "mide: no such path: $1" >&2; exit 1; }
+    exec open -a "$APP" "$DIR/$(basename "$1")"
+fi
+exec open -a "$APP"

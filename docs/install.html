@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Install mide</title>
+<meta name="description" content="Install mide on macOS with the .pkg installer, or build it from source. Requirements, first launch, the mide command and uninstalling.">
+<meta name="color-scheme" content="dark light">
+<meta property="og:title" content="Install mide">
+<meta property="og:description" content="Install mide on macOS with the .pkg installer, or build it from source. Requirements, first launch, the mide command and uninstalling.">
+<meta property="og:type" content="website">
+<link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
+<link rel="apple-touch-icon" href="assets/icon-180.png">
+<link rel="stylesheet" href="assets/style.css">
+<script>
+  // Apply the saved theme before first paint so there is no flash.
+  try { var t = localStorage.getItem('mide-theme'); if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t); } catch (e) {}
+</script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="site-head">
+  <div class="wrap">
+    <a class="brand" href="index.html"><img src="assets/icon-64.png" alt="" width="32" height="32">mide</a>
+    <nav class="nav" aria-label="Main">
+      <a href="install.html" aria-current="page">Install</a>
+      <a href="guide.html">Guide</a>
+      <a href="terminal.html">Terminal</a>
+      <a href="git.html">Git</a>
+      <a href="configuration.html">Configuration</a>
+      <a href="performance.html">Performance</a>
+      <a href="architecture.html">Architecture</a>
+      <a href="roadmap.html">Roadmap</a>
+      <button id="theme-toggle" type="button">Light theme</button>
+    </nav>
+  </div>
+</header>
+<main id="main">
+<div class="wrap page"><aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><ul><li><a href="#requirements">Requirements</a></li><li><a href="#install-with-the-package">Install with the package</a></li><li><a href="#first-launch">First launch</a></li><li><a href="#the-mide-command">The mide command</a></li><li><a href="#build-from-source">Build from source</a></li><li><a href="#update">Update</a></li><li><a href="#uninstall">Uninstall</a></li></ul></aside><article class="prose"><h1>Install mide</h1>
+<p class="lead">A macOS installer, or build it yourself in a few commands.</p>
+
+<h2 id="requirements">Requirements</h2>
+<ul>
+  <li>macOS 12 (Monterey) or later.</li>
+  <li>Apple Silicon for the <code>arm64</code> package. For an Intel Mac, use the <code>universal</code> package if the release lists one, or build from source.</li>
+  <li><code>git</code> on your PATH for the git window (it comes with the Xcode command line tools).</li>
+</ul>
+
+<h2 id="install-with-the-package">Install with the package</h2>
+<ol>
+  <li>Download <code>mide-0.1.0-arm64.pkg</code> (or the <code>universal</code> one) from the <a href="https://github.com/kmr-rohi/mide/releases/latest">latest release</a>.</li>
+  <li>Open it and follow the installer. It puts <strong>mide.app</strong> in <code>/Applications</code> and adds a <code>mide</code> command to <code>/usr/local/bin</code>.</li>
+  <li>Open mide from Applications, or run <code>mide .</code> in a project folder.</li>
+</ol>
+<p>To check the download, compare its checksum with the <code>.sha256</code> file on the release page:</p>
+<pre><code>shasum -a 256 -c mide-0.1.0-arm64.pkg.sha256</code></pre>
+<p>Prefer the command line? This installs without the window:</p>
+<pre><code>sudo installer -pkg mide-0.1.0-arm64.pkg -target /</code></pre>
+
+<h3>If macOS says it cannot be opened</h3>
+<div class="callout">
+  <p>mide is not yet notarized by Apple, so Gatekeeper shows an "unidentified developer" warning the first time. This is expected for an independent open-source app, and it is safe to continue if you downloaded the installer from this project's release page.</p>
+</div>
+<ul>
+  <li>Control-click (or right-click) the <code>.pkg</code>, choose <strong>Open</strong>, then <strong>Open</strong> again; or</li>
+  <li>open <strong>System Settings, Privacy &amp; Security</strong>, scroll down and choose <strong>Open Anyway</strong>; or</li>
+  <li>remove the download flag from the terminal: <code>xattr -d com.apple.quarantine mide-0.1.0-arm64.pkg</code></li>
+</ul>
+
+<h2 id="first-launch">First launch</h2>
+<p>You get a welcome screen with <strong>Open Folder</strong> and your recent folders. Press <kbd>⌘</kbd><kbd>O</kbd> to pick a project. If it is a git repository, its history is ready in the background and <kbd>⌃</kbd><kbd>⇧</kbd><kbd>G</kbd> shows it. Press <kbd>⌃</kbd><kbd>`</kbd> for a terminal. The <a href="guide.html">guide</a> covers the rest.</p>
+
+<h2 id="the-mide-command">The mide command</h2>
+<pre><code>mide                  # open the app
+mide ~/code/project   # open a folder
+mide notes.md         # open a file (and its folder)</code></pre>
+<p>It is a small script inside the app, linked into <code>/usr/local/bin</code> by the installer.</p>
+
+<h2 id="build-from-source">Build from source</h2>
+<p>You need the Rust toolchain and the full Xcode app (not just the command line tools), because the GPU interface compiles Metal shaders.</p>
+<pre><code>xcodebuild -downloadComponent MetalToolchain   # once, after installing Xcode
+git clone https://github.com/kmr-rohi/mide.git
+cd mide
+cargo run --release -p mide -- .</code></pre>
+<p>Build the app bundle or the installer yourself:</p>
+<pre><code>scripts/bundle.sh --install    # build mide.app and copy it to /Applications
+scripts/pkg.sh                 # build dist/mide-0.1.0-arm64.pkg
+scripts/pkg.sh --universal     # Apple Silicon and Intel in one package</code></pre>
+
+<h2 id="update">Update</h2>
+<p>Run the newer installer; it replaces the app in place. Your settings in <code>~/.config/mide</code> are kept.</p>
+
+<h2 id="uninstall">Uninstall</h2>
+<pre><code>sudo rm -rf /Applications/mide.app /usr/local/bin/mide
+rm -rf ~/.config/mide      # optional: settings, recent folders, trusted folders</code></pre>
+</article></div>
+</main>
+<footer class="site-foot">
+  <div class="wrap">
+    <p>mide is open source under the MIT license. It is an independent project, not affiliated with Sublime HQ, Zed, GitHub or Anthropic.</p>
+    <nav aria-label="Footer">
+      <a href="https://github.com/kmr-rohi/mide">Source on GitHub</a>
+      <a href="https://github.com/kmr-rohi/mide/releases">Releases</a>
+      <a href="https://github.com/kmr-rohi/mide/issues">Report a problem</a>
+      <a href="https://github.com/kmr-rohi/mide/blob/main/LICENSE">License</a>
+    </nav>
+  </div>
+</footer>
+<script src="assets/site.js" defer></script>
+</body>
+</html>

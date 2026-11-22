@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>mide, a native code editor written in Rust</title>
+<meta name="description" content="A fast native macOS code editor in Rust. Sublime-style speed, with git history and terminal sessions in the same window.">
+<meta name="color-scheme" content="dark light">
+<meta property="og:title" content="mide, a native code editor written in Rust">
+<meta property="og:description" content="A fast native macOS code editor in Rust. Sublime-style speed, with git history and terminal sessions in the same window.">
+<meta property="og:type" content="website">
+<link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
+<link rel="apple-touch-icon" href="assets/icon-180.png">
+<link rel="stylesheet" href="assets/style.css">
+<script>
+  // Apply the saved theme before first paint so there is no flash.
+  try { var t = localStorage.getItem('mide-theme'); if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t); } catch (e) {}
+</script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="site-head">
+  <div class="wrap">
+    <a class="brand" href="index.html"><img src="assets/icon-64.png" alt="" width="32" height="32">mide</a>
+    <nav class="nav" aria-label="Main">
+      <a href="install.html">Install</a>
+      <a href="guide.html">Guide</a>
+      <a href="terminal.html">Terminal</a>
+      <a href="git.html">Git</a>
+      <a href="configuration.html">Configuration</a>
+      <a href="performance.html">Performance</a>
+      <a href="architecture.html">Architecture</a>
+      <a href="roadmap.html">Roadmap</a>
+      <button id="theme-toggle" type="button">Light theme</button>
+    </nav>
+  </div>
+</header>
+<main id="main">
+<section class="hero">
+  <div class="wrap">
+    <div>
+      <h1>A native editor, written in Rust.</h1>
+      <p class="lead">Sublime-style speed with git and terminals in one window.</p>
+      <div class="actions">
+        <a class="btn" href="https://github.com/kmr-rohi/mide/releases/latest">Download for macOS</a>
+        <a class="btn btn-quiet" href="guide.html">Read the docs</a>
+      </div>
+    </div>
+    <div class="hero-figures">
+      <img src="assets/icon-128.png" alt="The mide icon: a teal letter m followed by a yellow text cursor" width="104" height="104">
+      <div class="figure"><b>4.6 ms</b><span>of work per keystroke</span></div><div class="figure"><b>63 ms</b><span>to open 1,000,000 lines</span></div><div class="figure"><b>0.6%</b><span>CPU when idle</span></div>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="wrap">
+    <h2>Fast where you feel it.</h2>
+    <p class="intro">Measured on a real build, not estimated, and every number can be reproduced.</p>
+    <div class="bignums"><div class="bignum"><b>12 ms</b><span>to jump to line 100,000</span><span class="note">with syntax colors</span></div><div class="bignum"><b>3.7 ms</b><span>of work per frame while scrolling</span><span class="note">median, in the real app</span></div><div class="bignum"><b>3.5 ms</b><span>to search 100,000 file names</span><span class="note">for each keystroke</span></div><div class="bignum"><b>390 ms</b><span>to take in 8 MB of terminal output</span><span class="note">from a real pty</span></div></div>
+    <div class="actions"><a class="btn btn-quiet" href="performance.html">See every benchmark</a></div>
+  </div>
+</section>
+
+<section class="section band">
+  <div class="wrap">
+    <h2>One window for the whole job.</h2>
+    <div class="grid-3">
+      <div>
+        <h3>An editor with Sublime's reflexes</h3>
+        <p>Multi-cursor, regex find and replace, line commands and the shortcuts you already know. Colors come from Sublime syntax definitions.</p>
+      </div>
+      <div>
+        <h3>Git history you can act on</h3>
+        <p>A commit graph, side-by-side diffs, staging, commit, push, pull, branches and stash, without leaving the editor.</p>
+      </div>
+      <div>
+        <h3>Terminals that dock anywhere</h3>
+        <p>Real sessions for your shell, Claude Code, GitHub Copilot or vim. Drag the panel to the bottom, left or right.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="wrap">
+    <h2>Rust, drawn on the GPU.</h2>
+    <div class="grid-2">
+      <div>
+        <p class="muted">No web view and no Electron. Text lives in a rope, highlighting is incremental, the terminal sleeps until output arrives, and git work stays off the interface thread.</p>
+        <div class="actions"><a class="btn btn-quiet" href="architecture.html">How it is built</a></div>
+      </div>
+      <div>
+        <p class="muted">The installer is 6.0 MB. Dark and light themes follow your Mac, and the terminal changes with them.</p>
+        <div class="actions"><a class="btn btn-quiet" href="configuration.html">Configure it in TOML</a></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section band">
+  <div class="wrap">
+    <h2>Install in a minute.</h2>
+    <p class="intro">Download the installer, open it, then start from any terminal.</p>
+    <pre data-nocopy><code>mide ~/code/my-project</code></pre>
+    <div class="actions">
+      <a class="btn" href="https://github.com/kmr-rohi/mide/releases/latest">Download for macOS</a>
+      <a class="btn btn-quiet" href="install.html">Installation guide</a>
+    </div>
+  </div>
+</section>
+
+</main>
+<footer class="site-foot">
+  <div class="wrap">
+    <p>mide is open source under the MIT license. It is an independent project, not affiliated with Sublime HQ, Zed, GitHub or Anthropic.</p>
+    <nav aria-label="Footer">
+      <a href="https://github.com/kmr-rohi/mide">Source on GitHub</a>
+      <a href="https://github.com/kmr-rohi/mide/releases">Releases</a>
+      <a href="https://github.com/kmr-rohi/mide/issues">Report a problem</a>
+      <a href="https://github.com/kmr-rohi/mide/blob/main/LICENSE">License</a>
+    </nav>
+  </div>
+</footer>
+<script src="assets/site.js" defer></script>
+</body>
+</html>

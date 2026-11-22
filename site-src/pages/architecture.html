@@ -1,0 +1,49 @@
+<!--title: Architecture, mide-->
+<!--desc: How mide is built: a Rust workspace of small crates, GPU rendering with GPUI, a rope text buffer, incremental highlighting and an event-driven terminal.-->
+<h1>Architecture</h1>
+<p class="lead">Small Rust crates for the engine, and one GPU-drawn interface on top.</p>
+
+<h2>Why it is fast</h2>
+<ul>
+  <li><strong>Native, no web view.</strong> The interface is drawn directly on the GPU with GPUI, the UI framework from Zed. There is no browser engine and no JavaScript runtime.</li>
+  <li><strong>A rope for text.</strong> The document is a balanced tree of chunks, so inserting in the middle of a 35 MB file costs microseconds and a copy of the whole file is never made.</li>
+  <li><strong>Only what you see.</strong> Each frame lays out the visible 50 or 60 lines. Everything else is untouched.</li>
+  <li><strong>Incremental highlighting.</strong> The syntax parser saves its state every 64 lines, so an edit re-parses only what changed, and a far jump starts from a short warm-up.</li>
+  <li><strong>Nothing slow on the interface thread.</strong> Git status and history load in the background. The terminal wakes the interface only when output arrives, so an idle terminal costs nothing.</li>
+</ul>
+
+<h2>The crates</h2>
+<div class="table-wrap"><table>
+<thead><tr><th scope="col">Crate</th><th scope="col">What it does</th><th scope="col">Built on</th></tr></thead>
+<tbody>
+<tr><td><code>core</code></td><td>The text buffer: rope, multiple cursors, grouped undo and redo, file load and save, find and replace, line commands.</td><td><code>ropey</code>, <code>regex</code></td></tr>
+<tr><td><code>syntax</code></td><td>Highlighting with Sublime syntax definitions, an incremental highlighter, and the editor theme (including Sublime color scheme files).</td><td><code>syntect</code>, <code>two-face</code></td></tr>
+<tr><td><code>files</code></td><td>The sidebar tree model, the file index for go-to-file that respects <code>.gitignore</code>, and a debounced file watcher.</td><td><code>ignore</code>, <code>notify</code></td></tr>
+<tr><td><code>git</code></td><td>Reads status, branches, the commit graph and diffs; changes things by running the real <code>git</code> program.</td><td><code>git2</code> (libgit2)</td></tr>
+<tr><td><code>fuzzy</code></td><td>Ranks file names and commands as you type and says which letters matched.</td><td><code>nucleo-matcher</code></td></tr>
+<tr><td><code>term</code></td><td>Runs a program on a PTY and turns its output into a grid of colored cells.</td><td><code>alacritty_terminal</code></td></tr>
+<tr><td><code>app</code></td><td>The interface: editor view, sidebar, tabs, git window, terminal panel, command palette, find bar, themes, layout.</td><td><code>gpui</code></td></tr>
+<tr><td><code>bench</code></td><td>The benchmark suite and its budgets.</td><td>the crates above</td></tr>
+</tbody></table></div>
+<p>The engine crates have no interface code in them, so they are tested on their own: unit tests, plus integration tests against real git repositories (including push and pull against a real remote) and real terminal sessions. There are about 150 automated tests.</p>
+
+<h2>How a keystroke travels</h2>
+<ol>
+  <li>macOS delivers the key to the editor view, which turns it into an action such as "insert a character".</li>
+  <li>The buffer applies the edit to the rope and merges it into the current undo step.</li>
+  <li>The highlighter forgets cached colors from the edited line down.</li>
+  <li>On the next frame, the editor view re-lays-out the visible lines (most are cached), paints selections, matches, text and carets, and asks the GPU to draw them.</li>
+</ol>
+<p>That is 4 to 5 ms of work in total, against a 16 ms budget.</p>
+
+<h2>Safety</h2>
+<ul>
+  <li>Saves write a temporary file and rename it over the original, so a crash cannot leave half a file.</li>
+  <li>A file that is not valid UTF-8 still opens, but mide refuses to save over it rather than corrupt it. Windows line endings and a byte-order mark are preserved.</li>
+  <li>Unsaved changes are confirmed before closing a tab, quitting, or switching folders.</li>
+  <li><a href="terminal.html#project-folders-and-trust">Workspace trust</a> stops a downloaded project from running commands when you open it.</li>
+  <li>Git operations use your own <code>git</code>, credentials and hooks; mide stores no secrets.</li>
+</ul>
+
+<h2>Dependencies and licenses</h2>
+<p>mide itself is MIT licensed. It is built from 525 open-source Rust crates, and an automated check confirms none of them is under a copyleft license such as GPL or AGPL. The full list is in <a href="https://github.com/{{repo}}/blob/main/THIRD_PARTY_LICENSES.md">THIRD_PARTY_LICENSES.md</a>. No fonts are bundled; mide uses fonts already on your Mac.</p>

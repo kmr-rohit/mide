@@ -1,0 +1,66 @@
+name: Release
+
+# Push a tag like v0.1.0 to build the installers and attach them to a GitHub release.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  pkg:
+    runs-on: macos-15
+    env:
+      # Optional signing + notarization. Without these secrets the packages are built
+      # unsigned (users see the "unidentified developer" prompt). See docs/notes/RELEASING.md.
+      HAS_SIGNING: ${{ secrets.MACOS_CERTIFICATE != '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+      - name: Metal toolchain
+        run: xcrun -f metal || xcodebuild -downloadComponent MetalToolchain
+
+      - name: The tag must match the version in Cargo.toml
+        run: |
+          V=$(sed -n 's/^version = "\(.*\)"/\1/p' crates/app/Cargo.toml | head -1)
+          [ "v$V" = "${GITHUB_REF_NAME}" ] || { echo "tag ${GITHUB_REF_NAME} does not match version $V"; exit 1; }
+
+      - name: Tests
+        run: cargo test --workspace
+
+      - name: Import signing certificates
+        if: env.HAS_SIGNING == 'true'
+        uses: apple-actions/import-codesign-certs@v3
+        with:
+          p12-file-base64: ${{ secrets.MACOS_CERTIFICATE }}
+          p12-password: ${{ secrets.MACOS_CERTIFICATE_PWD }}
+
+      - name: Store notarization credentials
+        if: env.HAS_SIGNING == 'true'
+        run: |
+          xcrun notarytool store-credentials mide-notary \
+            --apple-id "${{ secrets.APPLE_ID }}" \
+            --team-id "${{ secrets.APPLE_TEAM_ID }}" \
+            --password "${{ secrets.APPLE_APP_PASSWORD }}"
+
+      - name: Build packages
+        env:
+          DEVELOPER_ID_APP: ${{ secrets.DEVELOPER_ID_APP }}
+          DEVELOPER_ID_INSTALLER: ${{ secrets.DEVELOPER_ID_INSTALLER }}
+          NOTARY_PROFILE: ${{ env.HAS_SIGNING == 'true' && 'mide-notary' || '' }}
+        run: |
+          scripts/pkg.sh                # Apple Silicon
+          scripts/pkg.sh --universal    # Apple Silicon + Intel
+          ls -la dist
+
+      - name: Publish
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.pkg
+            dist/*.sha256
+          generate_release_notes: true

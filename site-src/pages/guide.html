@@ -1,0 +1,88 @@
+<!--title: Guide and shortcuts, mide-->
+<!--desc: Learn mide: opening projects, tabs, the command palette, find and replace, multi-cursor editing, git and terminal shortcuts.-->
+<h1>Guide</h1>
+<p class="lead">Everything you need to work in mide, and every shortcut.</p>
+
+<h2>Open a project</h2>
+<p>Press <kbd>⌘</kbd><kbd>O</kbd> and choose a folder. The sidebar shows its files, with ignored files dimmed. Click a file to open it, or press <kbd>⌘</kbd><kbd>P</kbd> and type part of its path.</p>
+<p>Opening a different folder replaces the whole workspace: its files and terminal sessions close, and if a file has unsaved changes you are asked first. To keep your files and terminals instead, set <code>keep_open_on_switch = true</code> in the <a href="configuration.html">configuration</a>.</p>
+
+<h2>Go to anything</h2>
+<div class="table-wrap"><table>
+<thead><tr><th scope="col">Shortcut</th><th scope="col">What it does</th></tr></thead>
+<tbody>
+<tr><td class="keys"><kbd>⌘</kbd><kbd>P</kbd></td><td>Go to file. Fuzzy matching over every file that git does not ignore.</td></tr>
+<tr><td class="keys"><kbd>⇧</kbd><kbd>⌘</kbd><kbd>P</kbd></td><td>Command palette: every command, with its shortcut.</td></tr>
+<tr><td class="keys"><kbd>⌃</kbd><kbd>G</kbd></td><td>Go to line. Type <code>120</code> or <code>120:8</code>.</td></tr>
+<tr><td class="keys"><kbd>⌘</kbd><kbd>O</kbd></td><td>Open a folder.</td></tr>
+<tr><td class="keys"><kbd>⌘</kbd><kbd>B</kbd></td><td>Show or hide the sidebar.</td></tr>
+</tbody></table></div>
+
+<h2>Files and tabs</h2>
+<div class="table-wrap"><table>
+<thead><tr><th scope="col">Shortcut</th><th scope="col">What it does</th></tr></thead>
+<tbody>
+<tr><td class="keys"><kbd>⌘</kbd><kbd>S</kbd></td><td>Save. Saving is atomic, and Windows line endings are kept.</td></tr>
+<tr><td class="keys"><kbd>⌘</kbd><kbd>W</kbd></td><td>Close the tab (or the terminal session, when a terminal has focus). A tab with unsaved changes asks for a second press.</td></tr>
+<tr><td class="keys"><kbd>⌃</kbd><kbd>Tab</kbd> / <kbd>⌃</kbd><kbd>⇧</kbd><kbd>Tab</kbd></td><td>Next and previous tab. <kbd>⇧</kbd><kbd>⌘</kbd><kbd>]</kbd> and <kbd>⇧</kbd><kbd>⌘</kbd><kbd>[</kbd> also work.</td></tr>
+<tr><td class="keys"><kbd>⌘</kbd><kbd>Q</kbd></td><td>Quit. With unsaved files it asks you to press again.</td></tr>
+</tbody></table></div>
+
+<h2>Editing</h2>
+<div class="table-wrap"><table>
+<thead><tr><th scope="col">Shortcut</th><th scope="col">What it does</th></tr></thead>
+<tbody>
+<tr><td class="keys"><kbd>⌘</kbd><kbd>Z</kbd> / <kbd>⇧</kbd><kbd>⌘</kbd><kbd>Z</kbd></td><td>Undo and redo. A run of typing, or of backspaces, is one step; a pause or Enter starts a new one.</td></tr>
+<tr><td class="keys"><kbd>⌘</kbd><kbd>X</kbd> <kbd>⌘</kbd><kbd>C</kbd> <kbd>⌘</kbd><kbd>V</kbd></td><td>Cut, copy, paste. With nothing selected, cut and copy take the whole line.</td></tr>
+<tr><td class="keys"><kbd>⌥</kbd><kbd>←</kbd> <kbd>⌥</kbd><kbd>→</kbd></td><td>Move by word. Add <kbd>⇧</kbd> to select.</td></tr>
+<tr><td class="keys"><kbd>⌘</kbd><kbd>←</kbd> <kbd>⌘</kbd><kbd>→</kbd></td><td>Line start and end. The first press goes to the first non-blank character.</td></tr>
+<tr><td class="keys"><kbd>⌘</kbd><kbd>↑</kbd> <kbd>⌘</kbd><kbd>↓</kbd></td><td>Start and end of the file.</td></tr>
+<tr><td class="keys"><kbd>⌥</kbd><kbd>⌫</kbd></td><td>Delete the previous word.</td></tr>
+<tr><td class="keys"><kbd>⇧</kbd><kbd>⌘</kbd><kbd>D</kbd></td><td>Duplicate the line or selected lines.</td></tr>
+<tr><td class="keys"><kbd>⌃</kbd><kbd>⇧</kbd><kbd>K</kbd></td><td>Delete the line.</td></tr>
+<tr><td class="keys"><kbd>⌃</kbd><kbd>⌘</kbd><kbd>↑</kbd> <kbd>⌃</kbd><kbd>⌘</kbd><kbd>↓</kbd></td><td>Move the line up or down.</td></tr>
+<tr><td class="keys"><kbd>⌘</kbd><kbd>J</kbd></td><td>Join lines.</td></tr>
+<tr><td class="keys"><kbd>⌘</kbd><kbd>]</kbd> <kbd>⌘</kbd><kbd>[</kbd></td><td>Indent and outdent. <kbd>Tab</kbd> and <kbd>⇧</kbd><kbd>Tab</kbd> do the same when several lines are selected.</td></tr>
+<tr><td class="keys"><kbd>⌘</kbd><kbd>/</kbd></td><td>Toggle a comment. The marker (<code>//</code>, <code>#</code>, <code>--</code>) follows the language.</td></tr>
+<tr><td class="keys"><kbd>⌘</kbd><kbd>↩</kbd> <kbd>⇧</kbd><kbd>⌘</kbd><kbd>↩</kbd></td><td>Open a new line below or above, keeping the indentation.</td></tr>
+</tbody></table></div>
+
+<h2>Selection and multiple cursors</h2>
+<div class="table-wrap"><table>
+<thead><tr><th scope="col">Shortcut</th><th scope="col">What it does</th></tr></thead>
+<tbody>
+<tr><td class="keys"><kbd>⌘</kbd><kbd>A</kbd></td><td>Select all.</td></tr>
+<tr><td class="keys"><kbd>⌘</kbd><kbd>L</kbd></td><td>Select the line; press again to take the next line too.</td></tr>
+<tr><td class="keys"><kbd>⌘</kbd><kbd>D</kbd></td><td>Select the word under the cursor; press again to add the next match as another cursor.</td></tr>
+<tr><td class="keys"><kbd>⌃</kbd><kbd>⌘</kbd><kbd>G</kbd></td><td>Select every occurrence.</td></tr>
+<tr><td class="keys">Click with <kbd>⌘</kbd></td><td>Add a cursor where you click.</td></tr>
+<tr><td class="keys">Double click, triple click</td><td>Select a word, select a line.</td></tr>
+</tbody></table></div>
+
+<h2>Find and replace</h2>
+<p>Press <kbd>⌘</kbd><kbd>F</kbd> for the find bar, or <kbd>⌥</kbd><kbd>⌘</kbd><kbd>F</kbd> to add the replace row. Matches are highlighted as you type and the bar shows your position, such as "3 of 12". A search never spans a line break, so <code>^</code> and <code>$</code> match at each line's ends.</p>
+<div class="table-wrap"><table>
+<thead><tr><th scope="col">Shortcut</th><th scope="col">What it does</th></tr></thead>
+<tbody>
+<tr><td class="keys"><kbd>↩</kbd> / <kbd>⇧</kbd><kbd>↩</kbd></td><td>Next and previous match. In the replace field, <kbd>↩</kbd> replaces the current match.</td></tr>
+<tr><td class="keys"><kbd>⌘</kbd><kbd>G</kbd> / <kbd>⇧</kbd><kbd>⌘</kbd><kbd>G</kbd></td><td>Next and previous match, even with the bar closed.</td></tr>
+<tr><td class="keys"><kbd>⌘</kbd><kbd>E</kbd></td><td>Use the selection as the search text.</td></tr>
+<tr><td class="keys"><kbd>⌥</kbd><kbd>⌘</kbd><kbd>C</kbd> <kbd>⌥</kbd><kbd>⌘</kbd><kbd>W</kbd> <kbd>⌥</kbd><kbd>⌘</kbd><kbd>R</kbd></td><td>Toggle case sensitive, whole word, regular expression.</td></tr>
+<tr><td class="keys"><kbd>⌥</kbd><kbd>⌘</kbd><kbd>↩</kbd></td><td>Replace all, as one undo step.</td></tr>
+<tr><td class="keys"><kbd>Esc</kbd></td><td>Close the bar.</td></tr>
+</tbody></table></div>
+<p>In regular expression mode the replacement can use <code>$1</code> and <code>${name}</code>.</p>
+
+<h2>Panels and views</h2>
+<div class="table-wrap"><table>
+<thead><tr><th scope="col">Shortcut</th><th scope="col">What it does</th></tr></thead>
+<tbody>
+<tr><td class="keys"><kbd>⌃</kbd><kbd>⇧</kbd><kbd>G</kbd></td><td>Show or hide <a href="git.html">git history</a>. <kbd>Esc</kbd> closes it.</td></tr>
+<tr><td class="keys"><kbd>⌃</kbd><kbd>`</kbd></td><td>Show or hide the <a href="terminal.html">terminal</a>.</td></tr>
+<tr><td class="keys"><kbd>⌘</kbd><kbd>⇧</kbd><kbd>T</kbd></td><td>New terminal session; pick a profile.</td></tr>
+<tr><td class="keys"><kbd>⌥</kbd><kbd>⌘</kbd><kbd>T</kbd></td><td>Switch between the light and dark theme.</td></tr>
+</tbody></table></div>
+<p>Drag the edges between panels to resize them. Drag the terminal's header toward the left, right or bottom edge of the window to dock it there. Sizes and the dock position are remembered.</p>
+
+<h2>Themes</h2>
+<p>The light and dark themes cover the sidebar, tabs, status bar, git window, command palette and the terminal, so they always match. The text editor keeps its own dark theme in both, by design. The choice is saved.</p>

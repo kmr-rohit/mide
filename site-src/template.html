@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{title}}</title>
+<meta name="description" content="{{desc}}">
+<meta name="color-scheme" content="dark light">
+<meta property="og:title" content="{{title}}">
+<meta property="og:description" content="{{desc}}">
+<meta property="og:type" content="website">
+<link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
+<link rel="apple-touch-icon" href="assets/icon-180.png">
+<link rel="stylesheet" href="assets/style.css">
+<script>
+  // Apply the saved theme before first paint so there is no flash.
+  try { var t = localStorage.getItem('mide-theme'); if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t); } catch (e) {}
+</script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="site-head">
+  <div class="wrap">
+    <a class="brand" href="index.html"><img src="assets/icon-64.png" alt="" width="32" height="32">mide</a>
+    <nav class="nav" aria-label="Main">
+{{nav}}
+      <button id="theme-toggle" type="button">Light theme</button>
+    </nav>
+  </div>
+</header>
+<main id="main">
+{{body}}
+</main>
+<footer class="site-foot">
+  <div class="wrap">
+    <p>mide is open source under the MIT license. It is an independent project, not affiliated with Sublime HQ, Zed, GitHub or Anthropic.</p>
+    <nav aria-label="Footer">
+      <a href="https://github.com/{{repo}}">Source on GitHub</a>
+      <a href="https://github.com/{{repo}}/releases">Releases</a>
+      <a href="https://github.com/{{repo}}/issues">Report a problem</a>
+      <a href="https://github.com/{{repo}}/blob/main/LICENSE">License</a>
+    </nav>
+  </div>
+</footer>
+<script src="assets/site.js" defer></script>
+</body>
+</html>

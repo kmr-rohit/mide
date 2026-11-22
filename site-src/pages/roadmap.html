@@ -1,0 +1,49 @@
+<!--title: Status and roadmap, mide-->
+<!--desc: What mide does today, what is missing, and what comes next. An honest list of known gaps.-->
+<h1>Status and roadmap</h1>
+<p class="lead">mide is young. Here is what is solid, and what is missing.</p>
+
+<h2>Solid today</h2>
+<ul>
+  <li>Opening, editing and saving files of any practical size, with multi-cursor, find and replace, and the common line commands.</li>
+  <li>Syntax highlighting for the languages in the Sublime and bat grammar sets.</li>
+  <li>A git window with history, diffs, staging, commit, push, pull, branches and stash.</li>
+  <li>Terminal sessions with profiles, docking, mouse support, Claude Code and GitHub Copilot.</li>
+  <li>Light and dark themes, a command palette, go-to-file and a saved layout.</li>
+</ul>
+
+<h2>Next up</h2>
+<p>Things that can cost you work are first.</p>
+<ol>
+  <li><strong>Notice files that change on disk.</strong> Today an open file is not refreshed when a formatter or <code>git checkout</code> changes it, and saving would overwrite that change. Clean buffers should reload, and edited ones should ask.</li>
+  <li><strong>Restore your session.</strong> Reopen tabs, positions and layout after a quit or crash, and back up unsaved edits.</li>
+  <li><strong>New file, Save As, and file operations</strong> in the sidebar: create, rename, delete, reveal in Finder.</li>
+  <li><strong>Find in files.</strong></li>
+</ol>
+
+<h2>Soon after</h2>
+<ul>
+  <li>Detect indentation (2 or 4 spaces, or tabs) per file, and auto-indent.</li>
+  <li>Scrollbars and a minimap, soft wrap, split panes, code folding.</li>
+  <li>A virtualized sidebar for very large folders.</li>
+  <li>Tab bar overflow and reordering; right-click menus.</li>
+  <li>Language server support: completion, go to definition, diagnostics.</li>
+  <li>A faster path for extremely long lines, and a background search for huge files.</li>
+</ul>
+
+<h2>Git and terminal depth</h2>
+<ul>
+  <li>Stage by hunk and by line, resolve conflicts, show blame and change markers in the gutter, rebase, delete and rename branches, search history.</li>
+  <li>Search in the terminal, clickable links and paths, split sessions.</li>
+  <li>Send the current file or selection to a Claude or Copilot session, and open the files an agent just changed.</li>
+</ul>
+
+<h2>Distribution</h2>
+<ul>
+  <li>Developer ID signing and Apple notarization, so the installer opens without a warning.</li>
+  <li>A universal package for Intel Macs published with every release, and Homebrew.</li>
+  <li>Automatic updates and a diagnostics file for bug reports.</li>
+</ul>
+
+<h2>Help shape it</h2>
+<p>Found a bug or want something moved up? <a href="https://github.com/{{repo}}/issues">Open an issue</a>. The most useful reports say what you did, what you expected, and what happened.</p>

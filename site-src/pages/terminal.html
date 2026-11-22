@@ -1,0 +1,66 @@
+<!--title: Terminal sessions, Claude Code and Copilot, mide-->
+<!--desc: Use real terminal sessions inside mide. Profiles for your shell, Claude Code, GitHub Copilot and vim, docking, mouse support and project trust.-->
+<h1>Terminal</h1>
+<p class="lead">Real terminal sessions in a panel you can dock anywhere.</p>
+
+<h2>Sessions</h2>
+<p>Press <kbd>⌃</kbd><kbd>`</kbd> to show the panel; the first press starts a shell in your project folder. Press <kbd>⌘</kbd><kbd>⇧</kbd><kbd>T</kbd> to start another session from a profile. Each session is a tab with a close button, and the tab shows the title the program sets.</p>
+<ul>
+  <li>Closing a session that is still running asks for a second <kbd>⌘</kbd><kbd>W</kbd>, so you do not end a long task by accident.</li>
+  <li>A session whose program exits cleanly closes itself; a failing one stays so you can read what happened.</li>
+  <li>Closing never freezes the app, even if the program ignores the hang-up signal: it is stopped after 1.5 seconds.</li>
+</ul>
+
+<h2>Dock it where you want it</h2>
+<p>Drag the panel's header toward an edge of the window; the bottom, left and right zones light up. Or use the dock button in the header, or "Terminal: Dock Left" in the command palette. Drag the divider to resize. The layout is saved in <code>~/.config/mide/layout.toml</code>.</p>
+
+<h2>Mouse, keyboard and scrollback</h2>
+<ul>
+  <li>The wheel scrolls the history of ordinary output, and a pill shows how far up you are. Click it, press any key, or press <kbd>⇧</kbd><kbd>End</kbd> to return.</li>
+  <li>Programs that ask for the mouse (vim, tmux, htop, full-screen AI tools) get real wheel, click and drag events. Hold <kbd>⇧</kbd> to select text instead.</li>
+  <li>Full-screen programs without mouse support, such as <code>less</code>, get arrow keys from the wheel.</li>
+  <li><kbd>⇧</kbd><kbd>PgUp</kbd>, <kbd>⇧</kbd><kbd>PgDn</kbd>, <kbd>⇧</kbd><kbd>Home</kbd>, <kbd>⇧</kbd><kbd>End</kbd> browse scrollback. <kbd>⌘</kbd><kbd>C</kbd> and <kbd>⌘</kbd><kbd>V</kbd> copy and paste, with bracketed paste support. Double and triple click select a word and a line.</li>
+</ul>
+
+<h2>Profiles</h2>
+<p>A profile is a way to start a session. Three exist from the start:</p>
+<div class="table-wrap"><table>
+<thead><tr><th scope="col">Profile</th><th scope="col">Runs</th></tr></thead>
+<tbody>
+<tr><td><code>Shell</code></td><td>Your login shell.</td></tr>
+<tr><td><code>Claude</code></td><td><code>claude</code>, listed when Claude Code is installed.</td></tr>
+<tr><td><code>Copilot</code></td><td><code>copilot</code>, or <code>gh copilot</code> as a fallback. Always listed.</td></tr>
+</tbody></table></div>
+<p>Commands run through your login shell, so they see the same PATH as in Terminal.app, including tools from nvm, Homebrew or <code>~/.local/bin</code>. mide asks your login shell once, in the background, which tools you have.</p>
+
+<h3>GitHub Copilot</h3>
+<p>Install the Copilot CLI once, then pick <strong>Copilot</strong> in <kbd>⌘</kbd><kbd>⇧</kbd><kbd>T</kbd>, or choose "Terminal: New Copilot Session" in the command palette. The first time, run <code>/login</code> inside it.</p>
+<pre><code>npm install -g @github/copilot     # or: brew install copilot-cli</code></pre>
+<p>If nothing is installed, the session prints these instructions instead of failing silently.</p>
+
+<h3>Your own profiles</h3>
+<p>Add profiles in <code>~/.config/mide/config.toml</code>. A profile with the same name replaces a built-in one.</p>
+<pre><code>[[terminal.profile]]
+name = "Claude"
+command = "claude"
+cwd = "."                          # relative to the project folder
+env = { ANTHROPIC_MODEL = "claude-opus-5-5" }
+
+[[terminal.profile]]
+name = "Python"
+command = "zsh"
+args = ["-c", "source .venv/bin/activate &amp;&amp; exec zsh"]
+
+[project]
+open_terminals = ["Shell", "Claude"]   # started when a folder opens</code></pre>
+<p>Saving the file reloads it. Every profile also appears in the command palette as "Terminal: New ... Session".</p>
+
+<h2>Project folders and trust</h2>
+<p>A project can have its own <code>.mide/config.toml</code>. Because terminal profiles and auto-started sessions run commands, they are <strong>ignored in a project until you trust the folder</strong>. Opening a repository you just cloned never runs its commands.</p>
+<div class="callout">
+  <p>When a project defines commands, mide tells you and waits. Run "Workspace: Trust This Folder" in the command palette to enable them. Trust is remembered in <code>~/.config/mide/trusted.txt</code> and covers the folder and everything inside it. Your own <code>~/.config/mide/config.toml</code> is always trusted.</p>
+</div>
+<p>Harmless project settings, such as fonts, apply whether or not the folder is trusted.</p>
+
+<h2>Colors and fonts</h2>
+<p>The terminal follows the app theme (light terminal in the light theme, dark in the dark theme) and uses the same font as the editor unless you set one in <code>[terminal]</code>.</p>

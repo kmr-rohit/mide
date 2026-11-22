@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Metal toolchain (needed to compile the GPU shaders)
+        run: xcrun -f metal || xcodebuild -downloadComponent MetalToolchain
+      - name: Tests
+        run: cargo test --workspace
+      - name: Lints
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Licenses (fails on anything outside the allow-list)
+        run: python3 scripts/licenses.py --check
+      - name: Website is up to date
+        run: |
+          python3 site-src/build.py
+          git diff --exit-code docs/ || (echo "docs/ is out of date: run python3 site-src/build.py and commit" && exit 1)

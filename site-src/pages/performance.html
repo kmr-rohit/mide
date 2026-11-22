@@ -1,0 +1,53 @@
+<!--title: Performance and benchmarks, mide-->
+<!--desc: Measured, reproducible benchmarks for mide: opening a million-line file, typing latency, search, syntax highlighting, fuzzy file search, git and terminal throughput.-->
+<h1>Performance</h1>
+<p class="lead">Every number here was measured by a command you can run yourself.</p>
+
+<h2>The headline numbers</h2>
+{{headline_cards}}
+<p class="legend">Measured on {{machine}} on {{bench_date}}, with a release build. Your numbers will differ with your hardware.</p>
+
+<h2>What a fast editor means here</h2>
+<p>A screen refreshes every 16 ms at 60 Hz. Typing feels instant when a keystroke costs much less than that, and nothing you trigger may block the interface. So each measurement has a <strong>budget</strong> set from what you would feel, and the results below show how much of it is used. A budget is a goal we hold ourselves to, not a number reverse-engineered from today's results.</p>
+
+<h2>The app itself</h2>
+<p>These come from the real app, driven by a script: open a 100,000-line file, type 150 characters, scroll 200 frames, jump to the end, then idle with a terminal session open.</p>
+{{app_table}}
+<p>"Frame work" is layout and paint calls for one frame, so it must stay well under 16 ms. "Input to paint" is longer because it includes waiting for the next screen refresh. Neither includes GPU presentation, which Instruments' Metal System Trace measures.</p>
+
+<h2>The engine, benchmark by benchmark</h2>
+<p>{{count_benchmarks}} benchmarks on a file of {{fixture_lines}} lines ({{fixture_mb}} MB), 100,000 file paths and a 20,000-file project tree. The bar shows how much of the budget the median used; a red bar means over budget.</p>
+{{bench_table}}
+<p class="legend">Two full-file searches run slightly over their 250 ms budget on this 35 MB file. They are listed rather than hidden.</p>
+
+<h2>What got faster by measuring</h2>
+<p>Benchmarks are only worth having if they find things. These were found, and fixed, along the way:</p>
+<div class="table-wrap"><table>
+<thead><tr><th scope="col">Problem</th><th scope="col">Before</th><th scope="col">After</th><th scope="col">Fix</th></tr></thead>
+<tbody>
+<tr><td>Jump to line 100,000 in a big file</td><td class="num">3.8 s</td><td class="num">12 ms</td><td>Highlight from a short warm-up above a far window instead of parsing every line before it.</td></tr>
+<tr><td>Start to first editor paint</td><td class="num">334 ms</td><td class="num">about 165 ms</td><td>Check for one font instead of listing every installed font, twice.</td></tr>
+<tr><td>Idle CPU with a terminal open</td><td class="num">about 8%</td><td class="num">under 1%</td><td>Wake on terminal output instead of polling every 12 ms.</td></tr>
+<tr><td>Closing a session whose program ignores hang-up</td><td class="num">froze the app</td><td class="num">instant</td><td>Wait for the process on another thread, with a forced stop after 1.5 s.</td></tr>
+<tr><td>Full-file search allocations</td><td class="num">293 ms</td><td class="num">about 270 ms</td><td>Search lines in place instead of copying each one.</td></tr>
+</tbody></table></div>
+
+<h2>Known limits</h2>
+<ul>
+  <li>One very long line is slow: a 3 MB minified file costs about 47 ms per keystroke, because the whole line is laid out each frame.</li>
+  <li>After a jump far into a big file, colors can be slightly off until you scroll through it, if a block comment opened further up.</li>
+  <li>Find runs on every keystroke; on a 35 MB file that is about a quarter of a second.</li>
+  <li>Start-up includes about 130 ms of window and GPU setup that happens before mide's own code runs.</li>
+  <li>Numbers come from one Apple Silicon Mac. Run the suite on yours.</li>
+</ul>
+
+<h2>Reproduce it</h2>
+<p>Use a release build; debug numbers are meaningless.</p>
+<pre><code>git clone https://github.com/{{repo}}.git &amp;&amp; cd mide
+scripts/perf.sh --quick      # about a minute, 100,000-line file
+scripts/perf.sh              # full run, 1,000,000-line file
+scripts/perf.sh --json       # also refresh the data behind this page</code></pre>
+<p>Or run one part:</p>
+<pre><code>cargo run --release -p mide-bench -- --filter search
+MIDE_PERF=1 MIDE_PERF_TYPING=200 MIDE_PERF_EXIT=1 target/release/mide some/file.rs</code></pre>
+<p>The scripted app run needs the window to stay visible: macOS stops drawing a covered window, and the script warns when it collects too few samples. For deeper profiling, use Instruments (Time Profiler, Metal System Trace, Allocations); the repository's <code>docs/notes/PERFORMANCE.md</code> has the commands.</p>

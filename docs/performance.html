@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Performance and benchmarks, mide</title>
+<meta name="description" content="Measured, reproducible benchmarks for mide: opening a million-line file, typing latency, search, syntax highlighting, fuzzy file search, git and terminal throughput.">
+<meta name="color-scheme" content="dark light">
+<meta property="og:title" content="Performance and benchmarks, mide">
+<meta property="og:description" content="Measured, reproducible benchmarks for mide: opening a million-line file, typing latency, search, syntax highlighting, fuzzy file search, git and terminal throughput.">
+<meta property="og:type" content="website">
+<link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
+<link rel="apple-touch-icon" href="assets/icon-180.png">
+<link rel="stylesheet" href="assets/style.css">
+<script>
+  // Apply the saved theme before first paint so there is no flash.
+  try { var t = localStorage.getItem('mide-theme'); if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t); } catch (e) {}
+</script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="site-head">
+  <div class="wrap">
+    <a class="brand" href="index.html"><img src="assets/icon-64.png" alt="" width="32" height="32">mide</a>
+    <nav class="nav" aria-label="Main">
+      <a href="install.html">Install</a>
+      <a href="guide.html">Guide</a>
+      <a href="terminal.html">Terminal</a>
+      <a href="git.html">Git</a>
+      <a href="configuration.html">Configuration</a>
+      <a href="performance.html" aria-current="page">Performance</a>
+      <a href="architecture.html">Architecture</a>
+      <a href="roadmap.html">Roadmap</a>
+      <button id="theme-toggle" type="button">Light theme</button>
+    </nav>
+  </div>
+</header>
+<main id="main">
+<div class="wrap page"><aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><ul><li><a href="#the-headline-numbers">The headline numbers</a></li><li><a href="#what-a-fast-editor-means-here">What a fast editor means here</a></li><li><a href="#the-app-itself">The app itself</a></li><li><a href="#the-engine-benchmark-by-benchmark">The engine, benchmark by benchmark</a></li><li><a href="#what-got-faster-by-measuring">What got faster by measuring</a></li><li><a href="#known-limits">Known limits</a></li><li><a href="#reproduce-it">Reproduce it</a></li></ul></aside><article class="prose"><h1>Performance</h1>
+<p class="lead">Every number here was measured by a command you can run yourself.</p>
+
+<h2 id="the-headline-numbers">The headline numbers</h2>
+<div class="bignums"><div class="bignum"><b>4.6 ms</b><span>of work for each keystroke</span><span class="note">median, in the real app</span></div><div class="bignum"><b>63 ms</b><span>to open a 1,000,000 line file</span><span class="note">35 MB</span></div><div class="bignum"><b>12 ms</b><span>to jump to line 100,000</span><span class="note">with syntax colors</span></div><div class="bignum"><b>3.5 ms</b><span>to search 100,000 file names</span><span class="note">for each keystroke</span></div></div>
+<p class="legend">Measured on Apple M5 Pro, 48 GB, macOS 26.7.3 on 2026-11-22, with a release build. Your numbers will differ with your hardware.</p>
+
+<h2 id="what-a-fast-editor-means-here">What a fast editor means here</h2>
+<p>A screen refreshes every 16 ms at 60 Hz. Typing feels instant when a keystroke costs much less than that, and nothing you trigger may block the interface. So each measurement has a <strong>budget</strong> set from what you would feel, and the results below show how much of it is used. A budget is a goal we hold ourselves to, not a number reverse-engineered from today's results.</p>
+
+<h2 id="the-app-itself">The app itself</h2>
+<p>These come from the real app, driven by a script: open a 100,000-line file, type 150 characters, scroll 200 frames, jump to the end, then idle with a terminal session open.</p>
+<div class="table-wrap"><table><thead><tr><th scope="col">Measure</th><th scope="col" class="num">Result</th><th scope="col">What it is</th></tr></thead><tbody><tr><td>Window created</td><td class='num'>130 ms</td><td>GPUI and Metal start-up, before mide&#x27;s own code runs</td></tr><tr><td>First editor paint</td><td class='num'>163 ms</td><td>folder opened, syntax loaded, first window drawn</td></tr><tr><td>Typing: frame work</td><td class='num'>4.6 ms median, 5.5 ms p95</td><td>layout and paint for one keystroke; the 16 ms frame budget is the limit</td></tr><tr><td>Typing: input to paint</td><td class='num'>9.5 ms median, 13.8 ms p95</td><td>includes waiting for the next screen refresh (about 8 ms on average at 60 Hz)</td></tr><tr><td>Scrolling, 3 lines per frame</td><td class='num'>3.7 ms median, 5.2 ms p95</td><td>frame work while scrolling</td></tr><tr><td>Jump to the end of the file</td><td class='num'>24 ms</td><td>one frame, from keypress to painted and colored</td></tr><tr><td>Idle CPU</td><td class='num'>0.6%</td><td>editor and one terminal session open</td></tr><tr><td>Memory</td><td class='num'>109 MB</td><td>same session</td></tr></tbody></table></div>
+<p>"Frame work" is layout and paint calls for one frame, so it must stay well under 16 ms. "Input to paint" is longer because it includes waiting for the next screen refresh. Neither includes GPU presentation, which Instruments' Metal System Trace measures.</p>
+
+<h2 id="the-engine-benchmark-by-benchmark">The engine, benchmark by benchmark</h2>
+<p>30 benchmarks on a file of 1,000,000 lines (35 MB), 100,000 file paths and a 20,000-file project tree. The bar shows how much of the budget the median used; a red bar means over budget.</p>
+<div class="table-wrap"><table><thead><tr><th scope="col">Benchmark</th><th scope="col" class="num">Median</th><th scope="col" class="num">p95</th><th scope="col" class="num">Budget</th><th scope="col">Share of budget used</th></tr></thead><tbody><tr class="group"><th colspan="5" scope="colgroup">Text buffer</th></tr><tr><td>open file</td><td class="num">63 ms</td><td class="num">63 ms</td><td class="num">1.50 s</td><td><span class="bar" role="img" aria-label="4 percent of the budget"><i style="--pct:4.2"></i></span></td></tr><tr><td>read 60 visible lines (per frame)</td><td class="num">8 µs</td><td class="num">9 µs</td><td class="num">500 µs</td><td><span class="bar" role="img" aria-label="2 percent of the budget"><i style="--pct:1.7"></i></span></td></tr><tr><td>type a character mid-document</td><td class="num">under 1 µs</td><td class="num">under 1 µs</td><td class="num">250 µs</td><td><span class="bar" role="img" aria-label="0 percent of the budget"><i style="--pct:0.1"></i></span></td></tr><tr><td>undo + redo a typed run</td><td class="num">under 1 µs</td><td class="num">under 1 µs</td><td class="num">1.0 ms</td><td><span class="bar" role="img" aria-label="0 percent of the budget"><i style="--pct:0.1"></i></span></td></tr><tr><td>type with 100 cursors</td><td class="num">16 µs</td><td class="num">20 µs</td><td class="num">3.0 ms</td><td><span class="bar" role="img" aria-label="1 percent of the budget"><i style="--pct:0.6"></i></span></td></tr><tr><td>duplicate line + undo (big doc)</td><td class="num">2 µs</td><td class="num">14 µs</td><td class="num">5.0 ms</td><td><span class="bar" role="img" aria-label="0 percent of the budget"><i style="--pct:0.0"></i></span></td></tr><tr><td>read one 1 MB line (every frame!)</td><td class="num">24 µs</td><td class="num">29 µs</td><td class="num">1.0 ms</td><td><span class="bar" role="img" aria-label="2 percent of the budget"><i style="--pct:2.4"></i></span></td></tr><tr><td>select all occurrences</td><td class="num">760 ms</td><td class="num">760 ms</td><td class="num">1.50 s</td><td><span class="bar" role="img" aria-label="51 percent of the budget"><i style="--pct:50.7"></i></span></td></tr><tr class="group"><th colspan="5" scope="colgroup">Find and replace</th></tr><tr><td>literal, rare (full scan)</td><td class="num">271 ms</td><td class="num">272 ms</td><td class="num">250 ms</td><td><span class="bar over" role="img" aria-label="100 percent of the budget"><i style="--pct:100.0"></i></span></td></tr><tr><td>literal, very common (capped 10k)</td><td class="num">10 ms</td><td class="num">11 ms</td><td class="num">60 ms</td><td><span class="bar" role="img" aria-label="17 percent of the budget"><i style="--pct:17.4"></i></span></td></tr><tr><td>regex (capped 10k)</td><td class="num">21 ms</td><td class="num">21 ms</td><td class="num">120 ms</td><td><span class="bar" role="img" aria-label="18 percent of the budget"><i style="--pct:17.7"></i></span></td></tr><tr><td>no match (full scan of file)</td><td class="num">268 ms</td><td class="num">268 ms</td><td class="num">250 ms</td><td><span class="bar over" role="img" aria-label="100 percent of the budget"><i style="--pct:100.0"></i></span></td></tr><tr><td>find next (wraps, rare term)</td><td class="num">139 ms</td><td class="num">140 ms</td><td class="num">250 ms</td><td><span class="bar" role="img" aria-label="56 percent of the budget"><i style="--pct:55.8"></i></span></td></tr><tr><td>replace all (every &#x27;let y&#x27;)</td><td class="num">325 ms</td><td class="num">325 ms</td><td class="num">4.00 s</td><td><span class="bar" role="img" aria-label="8 percent of the budget"><i style="--pct:8.1"></i></span></td></tr><tr class="group"><th colspan="5" scope="colgroup">Syntax highlighting</th></tr><tr><td>load all grammars (startup cost)</td><td class="num">546 µs</td><td class="num">546 µs</td><td class="num">80 ms</td><td><span class="bar" role="img" aria-label="1 percent of the budget"><i style="--pct:0.7"></i></span></td></tr><tr><td>first window (60 lines, top of file)</td><td class="num">2.5 ms</td><td class="num">15 ms</td><td class="num">6.0 ms</td><td><span class="bar" role="img" aria-label="41 percent of the budget"><i style="--pct:40.8"></i></span></td></tr><tr><td>re-highlight window after an edit</td><td class="num">2.3 ms</td><td class="num">2.4 ms</td><td class="num">6.0 ms</td><td><span class="bar" role="img" aria-label="39 percent of the budget"><i style="--pct:38.9"></i></span></td></tr><tr><td>cold jump to line 100000 (⌘↓ in a big file)</td><td class="num">12 ms</td><td class="num">12 ms</td><td class="num">50 ms</td><td><span class="bar" role="img" aria-label="24 percent of the budget"><i style="--pct:23.7"></i></span></td></tr><tr><td>throughput, 20k lines of Rust</td><td class="num">761 ms</td><td class="num">761 ms</td><td class="num">1.00 s</td><td><span class="bar" role="img" aria-label="76 percent of the budget"><i style="--pct:76.1"></i></span></td></tr><tr><td>throughput, 20k lines of JSON</td><td class="num">265 ms</td><td class="num">265 ms</td><td class="num">600 ms</td><td><span class="bar" role="img" aria-label="44 percent of the budget"><i style="--pct:44.1"></i></span></td></tr><tr class="group"><th colspan="5" scope="colgroup">Fuzzy file search</th></tr><tr><td>⌘P over 100k paths, short query</td><td class="num">8.4 ms</td><td class="num">8.6 ms</td><td class="num">12 ms</td><td><span class="bar" role="img" aria-label="70 percent of the budget"><i style="--pct:70.1"></i></span></td></tr><tr><td>⌘P over 100k paths, typical query</td><td class="num">3.5 ms</td><td class="num">3.7 ms</td><td class="num">12 ms</td><td><span class="bar" role="img" aria-label="29 percent of the budget"><i style="--pct:29.4"></i></span></td></tr><tr><td>⌘P over 100k paths, long query</td><td class="num">3.8 ms</td><td class="num">3.9 ms</td><td class="num">12 ms</td><td><span class="bar" role="img" aria-label="31 percent of the budget"><i style="--pct:31.3"></i></span></td></tr><tr class="group"><th colspan="5" scope="colgroup">Files</th></tr><tr><td>list 20k files (⌘P index)</td><td class="num">29 ms</td><td class="num">44 ms</td><td class="num">400 ms</td><td><span class="bar" role="img" aria-label="7 percent of the budget"><i style="--pct:7.3"></i></span></td></tr><tr><td>open the sidebar tree</td><td class="num">82 µs</td><td class="num">119 µs</td><td class="num">20 ms</td><td><span class="bar" role="img" aria-label="0 percent of the budget"><i style="--pct:0.4"></i></span></td></tr><tr class="group"><th colspan="5" scope="colgroup">Terminal</th></tr><tr><td>take in 100000 log lines (~8 MB) from a pty</td><td class="num">390 ms</td><td class="num">390 ms</td><td class="num">900 ms</td><td><span class="bar" role="img" aria-label="43 percent of the budget"><i style="--pct:43.3"></i></span></td></tr><tr><td>emulator parse speed, 1M lines (no PTY)</td><td class="num">82 ms</td><td class="num">82 ms</td><td class="num">600 ms</td><td><span class="bar" role="img" aria-label="14 percent of the budget"><i style="--pct:13.6"></i></span></td></tr><tr><td>snapshot 80x24 (per frame)</td><td class="num">22 µs</td><td class="num">23 µs</td><td class="num">500 µs</td><td><span class="bar" role="img" aria-label="4 percent of the budget"><i style="--pct:4.4"></i></span></td></tr><tr><td>snapshot 260x80 (per frame)</td><td class="num">163 µs</td><td class="num">338 µs</td><td class="num">2.0 ms</td><td><span class="bar" role="img" aria-label="8 percent of the budget"><i style="--pct:8.2"></i></span></td></tr><tr><td>start + close a session</td><td class="num">3.3 ms</td><td class="num">3.3 ms</td><td class="num">40 ms</td><td><span class="bar" role="img" aria-label="8 percent of the budget"><i style="--pct:8.3"></i></span></td></tr></tbody></table></div>
+<p class="legend">Two full-file searches run slightly over their 250 ms budget on this 35 MB file. They are listed rather than hidden.</p>
+
+<h2 id="what-got-faster-by-measuring">What got faster by measuring</h2>
+<p>Benchmarks are only worth having if they find things. These were found, and fixed, along the way:</p>
+<div class="table-wrap"><table>
+<thead><tr><th scope="col">Problem</th><th scope="col">Before</th><th scope="col">After</th><th scope="col">Fix</th></tr></thead>
+<tbody>
+<tr><td>Jump to line 100,000 in a big file</td><td class="num">3.8 s</td><td class="num">12 ms</td><td>Highlight from a short warm-up above a far window instead of parsing every line before it.</td></tr>
+<tr><td>Start to first editor paint</td><td class="num">334 ms</td><td class="num">about 165 ms</td><td>Check for one font instead of listing every installed font, twice.</td></tr>
+<tr><td>Idle CPU with a terminal open</td><td class="num">about 8%</td><td class="num">under 1%</td><td>Wake on terminal output instead of polling every 12 ms.</td></tr>
+<tr><td>Closing a session whose program ignores hang-up</td><td class="num">froze the app</td><td class="num">instant</td><td>Wait for the process on another thread, with a forced stop after 1.5 s.</td></tr>
+<tr><td>Full-file search allocations</td><td class="num">293 ms</td><td class="num">about 270 ms</td><td>Search lines in place instead of copying each one.</td></tr>
+</tbody></table></div>
+
+<h2 id="known-limits">Known limits</h2>
+<ul>
+  <li>One very long line is slow: a 3 MB minified file costs about 47 ms per keystroke, because the whole line is laid out each frame.</li>
+  <li>After a jump far into a big file, colors can be slightly off until you scroll through it, if a block comment opened further up.</li>
+  <li>Find runs on every keystroke; on a 35 MB file that is about a quarter of a second.</li>
+  <li>Start-up includes about 130 ms of window and GPU setup that happens before mide's own code runs.</li>
+  <li>Numbers come from one Apple Silicon Mac. Run the suite on yours.</li>
+</ul>
+
+<h2 id="reproduce-it">Reproduce it</h2>
+<p>Use a release build; debug numbers are meaningless.</p>
+<pre><code>git clone https://github.com/kmr-rohi/mide.git &amp;&amp; cd mide
+scripts/perf.sh --quick      # about a minute, 100,000-line file
+scripts/perf.sh              # full run, 1,000,000-line file
+scripts/perf.sh --json       # also refresh the data behind this page</code></pre>
+<p>Or run one part:</p>
+<pre><code>cargo run --release -p mide-bench -- --filter search
+MIDE_PERF=1 MIDE_PERF_TYPING=200 MIDE_PERF_EXIT=1 target/release/mide some/file.rs</code></pre>
+<p>The scripted app run needs the window to stay visible: macOS stops drawing a covered window, and the script warns when it collects too few samples. For deeper profiling, use Instruments (Time Profiler, Metal System Trace, Allocations); the repository's <code>docs/notes/PERFORMANCE.md</code> has the commands.</p>
+</article></div>
+</main>
+<footer class="site-foot">
+  <div class="wrap">
+    <p>mide is open source under the MIT license. It is an independent project, not affiliated with Sublime HQ, Zed, GitHub or Anthropic.</p>
+    <nav aria-label="Footer">
+      <a href="https://github.com/kmr-rohi/mide">Source on GitHub</a>
+      <a href="https://github.com/kmr-rohi/mide/releases">Releases</a>
+      <a href="https://github.com/kmr-rohi/mide/issues">Report a problem</a>
+      <a href="https://github.com/kmr-rohi/mide/blob/main/LICENSE">License</a>
+    </nav>
+  </div>
+</footer>
+<script src="assets/site.js" defer></script>
+</body>
+</html>

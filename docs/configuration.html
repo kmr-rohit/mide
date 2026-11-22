@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Configuration reference, mide</title>
+<meta name="description" content="Every setting in mide: config.toml, project config, layout.toml, fonts, terminal profiles, trust, files on disk and environment variables.">
+<meta name="color-scheme" content="dark light">
+<meta property="og:title" content="Configuration reference, mide">
+<meta property="og:description" content="Every setting in mide: config.toml, project config, layout.toml, fonts, terminal profiles, trust, files on disk and environment variables.">
+<meta property="og:type" content="website">
+<link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
+<link rel="apple-touch-icon" href="assets/icon-180.png">
+<link rel="stylesheet" href="assets/style.css">
+<script>
+  // Apply the saved theme before first paint so there is no flash.
+  try { var t = localStorage.getItem('mide-theme'); if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t); } catch (e) {}
+</script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="site-head">
+  <div class="wrap">
+    <a class="brand" href="index.html"><img src="assets/icon-64.png" alt="" width="32" height="32">mide</a>
+    <nav class="nav" aria-label="Main">
+      <a href="install.html">Install</a>
+      <a href="guide.html">Guide</a>
+      <a href="terminal.html">Terminal</a>
+      <a href="git.html">Git</a>
+      <a href="configuration.html" aria-current="page">Configuration</a>
+      <a href="performance.html">Performance</a>
+      <a href="architecture.html">Architecture</a>
+      <a href="roadmap.html">Roadmap</a>
+      <button id="theme-toggle" type="button">Light theme</button>
+    </nav>
+  </div>
+</header>
+<main id="main">
+<div class="wrap page"><aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><ul><li><a href="#where-settings-live">Where settings live</a></li><li><a href="#config-toml">config.toml</a></li><li><a href="#layout-toml">layout.toml</a></li><li><a href="#themes">Themes</a></li><li><a href="#environment-variables">Environment variables</a></li></ul></aside><article class="prose"><h1>Configuration</h1>
+<p class="lead">Plain TOML files. Save one and mide reloads it.</p>
+
+<h2 id="where-settings-live">Where settings live</h2>
+<div class="table-wrap"><table>
+<thead><tr><th scope="col">File</th><th scope="col">What it holds</th></tr></thead>
+<tbody>
+<tr><td><code>~/.config/mide/config.toml</code></td><td>Your settings: fonts, terminal profiles, behavior. Always trusted.</td></tr>
+<tr><td><code>&lt;project&gt;/.mide/config.toml</code></td><td>Per-project overrides. Terminal commands in it need <a href="terminal.html#project-folders-and-trust">trust</a>.</td></tr>
+<tr><td><code>~/.config/mide/layout.toml</code></td><td>Theme, panel sizes, terminal dock. mide writes this as you resize and dock.</td></tr>
+<tr><td><code>~/.config/mide/recent.txt</code></td><td>Recent folders, newest first.</td></tr>
+<tr><td><code>~/.config/mide/trusted.txt</code></td><td>Folders whose project config may run commands.</td></tr>
+</tbody></table></div>
+<p>A project's file overrides yours for the same setting. A typo never stops mide: the bad file is skipped and you get a message.</p>
+<p>To create a commented starting file, run "Preferences: Edit Global Config" or "Preferences: Edit Project Config" in the command palette.</p>
+
+<h2 id="config-toml">config.toml</h2>
+<pre><code>[editor]
+font_family = "Monaco"      # any installed monospace font
+font_size = 12
+
+[workspace]
+keep_open_on_switch = false # true: opening another folder keeps files and terminals
+
+[terminal]
+scrollback = 10000
+font_family = "Menlo"       # optional; follows [editor] when omitted
+font_size = 13              # optional
+
+[[terminal.profile]]
+name = "Claude"
+command = "claude"
+args = []
+cwd = "."
+env = { ANTHROPIC_MODEL = "claude-opus-5-5" }
+
+[project]
+open_terminals = ["Shell", "Claude"]</code></pre>
+
+<h3>[editor]</h3>
+<div class="table-wrap"><table>
+<thead><tr><th scope="col">Key</th><th scope="col">Default</th><th scope="col">Meaning</th></tr></thead>
+<tbody>
+<tr><td><code>font_family</code></td><td><code>Monaco</code></td><td>Font for the editor, diffs and (by default) the terminal. If it is not installed you get a notice and Monaco, Menlo, SF Mono or Courier New is used.</td></tr>
+<tr><td><code>font_size</code></td><td><code>12</code></td><td>Between 6 and 48. Line height scales with it.</td></tr>
+</tbody></table></div>
+
+<h3>[workspace]</h3>
+<div class="table-wrap"><table>
+<thead><tr><th scope="col">Key</th><th scope="col">Default</th><th scope="col">Meaning</th></tr></thead>
+<tbody>
+<tr><td><code>keep_open_on_switch</code></td><td><code>false</code></td><td>When you open another folder, keep the open files and terminal sessions instead of closing them.</td></tr>
+</tbody></table></div>
+
+<h3>[terminal]</h3>
+<div class="table-wrap"><table>
+<thead><tr><th scope="col">Key</th><th scope="col">Default</th><th scope="col">Meaning</th></tr></thead>
+<tbody>
+<tr><td><code>scrollback</code></td><td><code>10000</code></td><td>Lines of history kept per session.</td></tr>
+<tr><td><code>font_family</code>, <code>font_size</code></td><td>the editor's</td><td>Terminal-only overrides.</td></tr>
+</tbody></table></div>
+
+<h3>[[terminal.profile]]</h3>
+<div class="table-wrap"><table>
+<thead><tr><th scope="col">Key</th><th scope="col">Meaning</th></tr></thead>
+<tbody>
+<tr><td><code>name</code></td><td>Shown in the picker. The same name as a built-in profile replaces it.</td></tr>
+<tr><td><code>command</code></td><td>What to run, through your login shell. Leave it out for a plain shell. Shell syntax such as <code>a &amp;&amp; b</code> works.</td></tr>
+<tr><td><code>args</code></td><td>List of arguments, quoted for you.</td></tr>
+<tr><td><code>cwd</code></td><td>Working directory, relative to the project folder. Falls back to the project folder if it does not exist.</td></tr>
+<tr><td><code>env</code></td><td>Extra environment variables for the session.</td></tr>
+</tbody></table></div>
+
+<h3>[project]</h3>
+<div class="table-wrap"><table>
+<thead><tr><th scope="col">Key</th><th scope="col">Meaning</th></tr></thead>
+<tbody>
+<tr><td><code>open_terminals</code></td><td>Profile names to start when a folder opens. Only starts sessions if none are running, so switching folders never piles up duplicates.</td></tr>
+</tbody></table></div>
+
+<h2 id="layout-toml">layout.toml</h2>
+<p>You rarely edit this by hand, but you can.</p>
+<pre><code>theme = "dark"            # "light" or "dark"
+sidebar_width = 224.0
+show_sidebar = true
+terminal_dock = "bottom"  # "bottom", "left" or "right"
+terminal_height = 300.0   # used when docked at the bottom
+terminal_width = 480.0    # used when docked left or right
+git_locations_width = 200.0
+git_commits_width = 380.0</code></pre>
+<p>Out-of-range or unreadable values fall back to sensible ones.</p>
+
+<h2 id="themes">Themes</h2>
+<p>Two app themes, light and dark, cover everything except the text editor. The terminal changes with the app. Switch with <kbd>⌥</kbd><kbd>⌘</kbd><kbd>T</kbd> or "View: Light Theme" and "View: Dark Theme" in the command palette.</p>
+<p>Editor colors come from a built-in dark theme. The code can also read Sublime Text <code>.sublime-color-scheme</code> files, but there is no setting that loads one yet.</p>
+
+<h2 id="environment-variables">Environment variables</h2>
+<div class="table-wrap"><table>
+<thead><tr><th scope="col">Variable</th><th scope="col">Effect</th></tr></thead>
+<tbody>
+<tr><td><code>MIDE_PERF=1</code></td><td>Print start-up timings, the time for each keystroke you type, and any slow frame.</td></tr>
+<tr><td><code>MIDE_PERF_TYPING=N</code></td><td>Type N characters by itself, then scroll and jump, and print latency statistics. See <a href="performance.html#reproduce-it">performance</a>.</td></tr>
+<tr><td><code>MIDE_PERF_EXIT=1</code></td><td>Quit after the scripted run.</td></tr>
+<tr><td><code>MIDE_PERF_JSON=path</code></td><td>Write the scripted run's results as JSON.</td></tr>
+<tr><td><code>MIDE_OPEN_GIT=1</code></td><td>Start with the git window open.</td></tr>
+</tbody></table></div>
+</article></div>
+</main>
+<footer class="site-foot">
+  <div class="wrap">
+    <p>mide is open source under the MIT license. It is an independent project, not affiliated with Sublime HQ, Zed, GitHub or Anthropic.</p>
+    <nav aria-label="Footer">
+      <a href="https://github.com/kmr-rohi/mide">Source on GitHub</a>
+      <a href="https://github.com/kmr-rohi/mide/releases">Releases</a>
+      <a href="https://github.com/kmr-rohi/mide/issues">Report a problem</a>
+      <a href="https://github.com/kmr-rohi/mide/blob/main/LICENSE">License</a>
+    </nav>
+  </div>
+</footer>
+<script src="assets/site.js" defer></script>
+</body>
+</html>

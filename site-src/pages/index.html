@@ -1,0 +1,76 @@
+<!--title: mide, a native code editor written in Rust-->
+<!--desc: A fast native macOS code editor in Rust. Sublime-style speed, with git history and terminal sessions in the same window.-->
+<!--layout: home-->
+<section class="hero">
+  <div class="wrap">
+    <div>
+      <h1>A native editor, written in Rust.</h1>
+      <p class="lead">Sublime-style speed with git and terminals in one window.</p>
+      <div class="actions">
+        <a class="btn" href="https://github.com/{{repo}}/releases/latest">Download for macOS</a>
+        <a class="btn btn-quiet" href="guide.html">Read the docs</a>
+      </div>
+    </div>
+    <div class="hero-figures">
+      <img src="assets/icon-128.png" alt="The mide icon: a teal letter m followed by a yellow text cursor" width="104" height="104">
+      {{hero_figures}}
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="wrap">
+    <h2>Fast where you feel it.</h2>
+    <p class="intro">Measured on a real build, not estimated, and every number can be reproduced.</p>
+    {{bench_cards}}
+    <div class="actions"><a class="btn btn-quiet" href="performance.html">See every benchmark</a></div>
+  </div>
+</section>
+
+<section class="section band">
+  <div class="wrap">
+    <h2>One window for the whole job.</h2>
+    <div class="grid-3">
+      <div>
+        <h3>An editor with Sublime's reflexes</h3>
+        <p>Multi-cursor, regex find and replace, line commands and the shortcuts you already know. Colors come from Sublime syntax definitions.</p>
+      </div>
+      <div>
+        <h3>Git history you can act on</h3>
+        <p>A commit graph, side-by-side diffs, staging, commit, push, pull, branches and stash, without leaving the editor.</p>
+      </div>
+      <div>
+        <h3>Terminals that dock anywhere</h3>
+        <p>Real sessions for your shell, Claude Code, GitHub Copilot or vim. Drag the panel to the bottom, left or right.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="wrap">
+    <h2>Rust, drawn on the GPU.</h2>
+    <div class="grid-2">
+      <div>
+        <p class="muted">No web view and no Electron. Text lives in a rope, highlighting is incremental, the terminal sleeps until output arrives, and git work stays off the interface thread.</p>
+        <div class="actions"><a class="btn btn-quiet" href="architecture.html">How it is built</a></div>
+      </div>
+      <div>
+        <p class="muted">The installer is {{pkg_size}}. Dark and light themes follow your Mac, and the terminal changes with them.</p>
+        <div class="actions"><a class="btn btn-quiet" href="configuration.html">Configure it in TOML</a></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section band">
+  <div class="wrap">
+    <h2>Install in a minute.</h2>
+    <p class="intro">Download the installer, open it, then start from any terminal.</p>
+    <pre data-nocopy><code>mide ~/code/my-project</code></pre>
+    <div class="actions">
+      <a class="btn" href="https://github.com/{{repo}}/releases/latest">Download for macOS</a>
+      <a class="btn btn-quiet" href="install.html">Installation guide</a>
+    </div>
+  </div>
+</section>

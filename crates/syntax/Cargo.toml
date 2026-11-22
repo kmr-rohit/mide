@@ -1,0 +1,11 @@
+[package]
+name = "mide-syntax"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+syntect = { version = "5.3.0", default-features = false, features = ["default-fancy"] }
+two-face = { version = "0.5.2", default-features = false, features = ["syntect-fancy"] }

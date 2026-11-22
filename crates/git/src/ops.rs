@@ -353,7 +353,8 @@ mod tests {
         stage_all(pa).unwrap();
         commit(pa, "three", false).unwrap();
         push(pa).unwrap();
-        assert_eq!(git_ok(remote.path(), &["log", "-1", "--format=%s"]), "three");
+        // `--git-dir` keeps this working under `safe.bareRepository=explicit`.
+        assert_eq!(git_ok(remote.path(), &["--git-dir", &url, "log", "-1", "--format=%s"]), "three");
     }
 
     #[test]

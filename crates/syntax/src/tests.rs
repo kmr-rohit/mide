@@ -158,8 +158,12 @@ fn a_far_jump_is_instant_and_matches_the_exact_result_for_ordinary_code() {
     let (s, t, n) = setup("Rust");
     let doc = many_lines(8000);
 
-    let mut h = DocHighlighter::new(s.clone(), t.clone(), &n);
-    // Timed after construction: building the highlighter compiles grammars, which is slow in debug builds on CI.
+    // The exact parse runs first so the grammar's regexes are compiled (syntect does
+    // that lazily, and it is slow in debug builds); the timing then covers only the jump.
+    let mut exact = DocHighlighter::new(s.clone(), t.clone(), &n);
+    let full = exact.highlight_range(0, 7030, |i| doc[i].clone());
+
+    let mut h = DocHighlighter::new(s, t, &n);
     let started = std::time::Instant::now();
     let far = h.highlight_window(7000, 30, |i| doc[i].clone());
     let took = started.elapsed();
@@ -168,8 +172,6 @@ fn a_far_jump_is_instant_and_matches_the_exact_result_for_ordinary_code() {
     assert_eq!(far.lines.len(), 30);
 
     // Plain code has no multi-line state, so the shortcut agrees with the full parse.
-    let mut exact = DocHighlighter::new(s, t, &n);
-    let full = exact.highlight_range(0, 7030, |i| doc[i].clone());
     assert_eq!(far.lines, full[7000..7030]);
 }
 

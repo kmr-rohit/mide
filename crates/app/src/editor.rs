@@ -865,7 +865,19 @@ impl EntityInputHandler for EditorView {
             self.buffer.set_selections(vec![Selection::new(r.start, r.end)]);
         }
         let text = text.to_owned();
-        self.edit(|b| b.insert(&text), cx);
+        let mut chars = text.chars();
+        let single = chars.next().filter(|_| chars.next().is_none());
+        match single {
+            // Typing one character at a time (not IME, not paste): auto-close brackets and quotes.
+            Some(c) if self.show_gutter && self.marked.is_none() => {
+                self.edit(|b| {
+                    if !b.type_char(c) {
+                        b.insert(&text);
+                    }
+                }, cx)
+            }
+            _ => self.edit(|b| b.insert(&text), cx),
+        }
     }
 
     fn replace_and_mark_text_in_range(
@@ -979,17 +991,25 @@ impl Render for EditorView {
             .on_action(cx.listener(|this, _: &DeleteWordBackward, _, cx| {
                 this.edit(|b| b.delete_word_backward(), cx)
             }))
-            .on_action(cx.listener(|this, _: &Newline, _, cx| this.edit(|b| b.insert_newline(), cx)))
+            .on_action(cx.listener(|this, _: &Newline, _, cx| {
+                // Python and YAML open a block after a trailing colon.
+                let colon = matches!(this.syntax_name.as_str(), "Python" | "YAML");
+                if this.show_gutter {
+                    this.edit(|b| b.insert_newline_auto(colon), cx)
+                } else {
+                    this.edit(|b| b.insert_newline(), cx)
+                }
+            }))
             .on_action(cx.listener(|this, _: &Tab, _, cx| {
                 // Tab with several lines selected indents them; otherwise it types a tab stop.
                 if this.buffer.selection_spans_lines() {
-                    this.edit(|b| b.indent_lines(TAB_SIZE), cx)
+                    this.edit(|b| { let n = b.indent().width(); b.indent_lines(n) }, cx)
                 } else {
-                    this.edit(|b| b.insert_tab(TAB_SIZE), cx)
+                    this.edit(|b| { let n = b.indent().width(); b.insert_tab(n) }, cx)
                 }
             }))
-            .on_action(cx.listener(|this, _: &IndentLines, _, cx| this.edit(|b| b.indent_lines(TAB_SIZE), cx)))
-            .on_action(cx.listener(|this, _: &OutdentLines, _, cx| this.edit(|b| b.outdent_lines(TAB_SIZE), cx)))
+            .on_action(cx.listener(|this, _: &IndentLines, _, cx| this.edit(|b| { let n = b.indent().width(); b.indent_lines(n) }, cx)))
+            .on_action(cx.listener(|this, _: &OutdentLines, _, cx| this.edit(|b| { let n = b.indent().width(); b.outdent_lines(n) }, cx)))
             .on_action(cx.listener(|this, _: &DuplicateLine, _, cx| this.edit(|b| b.duplicate_line(), cx)))
             .on_action(cx.listener(|this, _: &DeleteLine, _, cx| this.edit(|b| b.delete_line(), cx)))
             .on_action(cx.listener(|this, _: &MoveLineUp, _, cx| this.edit(|b| b.move_lines(true), cx)))

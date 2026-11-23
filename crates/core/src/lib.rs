@@ -106,6 +106,7 @@ pub struct Buffer {
     /// Char offset of the earliest change in the last edit/undo/redo.
     last_edit_at: usize,
     group_window: Duration,
+    indent: Indent,
 }
 
 impl Default for Buffer {
@@ -128,6 +129,7 @@ impl Buffer {
             lossy: false,
             last_edit_at: 0,
             group_window: DEFAULT_GROUP_WINDOW,
+            indent: Indent::Spaces(4),
         }
     }
 
@@ -162,6 +164,9 @@ impl Buffer {
         let mut b = Self::from_text(&text.replace("\r\n", "\n"));
         b.line_ending = line_ending;
         b.lossy = lossy;
+        if let Some(i) = detect_indent(&b.rope.slice(..b.rope.len_chars().min(200_000)).to_string()) {
+            b.indent = i;
+        }
         Ok(b)
     }
 
@@ -508,6 +513,9 @@ impl Buffer {
 
     /// Tab: insert spaces up to the next tab stop (or replace the selection).
     pub fn insert_tab(&mut self, tab_size: usize) {
+        if self.indent == Indent::Tabs {
+            return self.edit_selections(|_, sel| (sel.start(), sel.end(), "\t".to_owned()));
+        }
         let this = &*self;
         let plans: Vec<String> = this
             .selections
@@ -523,7 +531,9 @@ impl Buffer {
     pub fn delete_backward(&mut self) {
         let rope = self.rope.clone();
         self.edit_selections_kind(TxKind::Deleting, |_, sel| {
-            if sel.is_empty() {
+            if sel.is_empty() && pair_around(&rope, sel.start()) {
+                (sel.start() - 1, sel.start() + 1, String::new())
+            } else if sel.is_empty() {
                 (prev_grapheme(&rope, sel.start()), sel.start(), String::new())
             } else {
                 (sel.start(), sel.end(), String::new())
@@ -758,8 +768,18 @@ fn boundary(rope: &Rope, at: usize, forward: bool) -> usize {
     }
 }
 
+/// True when the caret sits inside an empty `()`, `[]`, `{}` or quote pair.
+fn pair_around(rope: &Rope, at: usize) -> bool {
+    if at == 0 || at >= rope.len_chars() {
+        return false;
+    }
+    matches!((rope.char(at - 1), rope.char(at)), ('(', ')') | ('[', ']') | ('{', '}') | ('"', '"') | ('\'', '\'') | ('`', '`'))
+}
+
 mod lineops;
 pub mod search;
+mod smart;
+pub use smart::{detect_indent, Indent};
 
 #[cfg(test)]
 mod lineops_tests;

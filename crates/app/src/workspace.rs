@@ -2112,7 +2112,7 @@ impl Workspace {
             None => format!("{git}, Line {line}, Column {col}"),
         };
         let branch = self.git.as_ref().and_then(|g| g.branch.clone()).unwrap_or_default();
-        (left, format!("{branch}      Spaces: 4      {}", ed.syntax_name))
+        (left, format!("{branch}      {}      {}", ed.buffer.indent().label(), ed.syntax_name))
     }
 }
 

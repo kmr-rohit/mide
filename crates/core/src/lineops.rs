@@ -260,7 +260,7 @@ impl Buffer {
 
     /// ⌘] / Tab on a multi-line selection: indent the selected lines.
     pub fn indent_lines(&mut self, tab_size: usize) {
-        let pad = " ".repeat(tab_size);
+        let pad = if self.indent == crate::Indent::Tabs { "\t".to_owned() } else { " ".repeat(tab_size) };
         let mut plans = Vec::new();
         for (a, b) in self.selected_line_spans() {
             for l in a..=b {

@@ -42,6 +42,8 @@ struct EditorSection {
 struct WorkspaceSection {
     /// Keep open files and terminal sessions when another folder is opened.
     keep_open_on_switch: Option<bool>,
+    /// Reopen last session's files (and recover unsaved text) when a folder opens.
+    restore_session: Option<bool>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -69,6 +71,8 @@ pub struct Config {
     pub terminal_font_size: Option<f32>,
     /// Opening another folder keeps the open files and terminals (default: closes them).
     pub keep_open_on_switch: bool,
+    /// Reopen the files from last time and recover unsaved text (default: on).
+    pub restore_session: bool,
     pub profiles: Vec<Profile>,
     /// Profile names to start when a project opens.
     pub open_terminals: Vec<String>,
@@ -196,6 +200,7 @@ impl Config {
             terminal_font_family: None,
             terminal_font_size: None,
             keep_open_on_switch: false,
+            restore_session: true,
             profiles,
             open_terminals: Vec::new(),
         }
@@ -222,6 +227,9 @@ impl Config {
         }
         if let Some(keep) = file.workspace.keep_open_on_switch {
             self.keep_open_on_switch = keep;
+        }
+        if let Some(restore) = file.workspace.restore_session {
+            self.restore_session = restore;
         }
         for p in file.terminal.profile.into_iter().filter(|p| !p.name.trim().is_empty()) {
             match self.profiles.iter_mut().find(|q| q.name == p.name) {
@@ -330,6 +338,8 @@ font_size = 12
 # false: opening another folder closes the current files and terminals (default).
 # true:  they stay open, now working in the new project.
 keep_open_on_switch = false
+# true: reopen last time's files and caret positions, and recover unsaved text after a crash.
+restore_session = true
 
 [terminal]
 scrollback = 10000

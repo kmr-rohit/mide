@@ -1,5 +1,6 @@
 //! The window's root view: sidebar, tab bar, active editor, status bar.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::Receiver;
 use std::sync::Arc;
@@ -8,7 +9,7 @@ use std::time::Duration;
 use gpui::{
     WeakEntity, actions, div, prelude::*, px, rgb, svg, App, ClickEvent, Context, Entity, EntityId, FocusHandle,
     Focusable, FontWeight, IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
-    PathPromptOptions, Render, SharedString, Window, CursorStyle, rgba,
+    ClipboardItem, Pixels, Point, PathPromptOptions, Render, SharedString, Window, CursorStyle, rgba,
 };
 use mide_core::Buffer;
 use mide_fuzzy::Kind;
@@ -18,7 +19,8 @@ use mide_syntax::{Syntaxes, Theme};
 
 use crate::assets::file_icon;
 use crate::config::{self, Config, Tools};
-use crate::editor::EditorView;
+use crate::editor::{DiskCheck, EditorView};
+use crate::session::{SessionState, Store, TabState};
 use crate::fonts::{self, Fonts};
 use crate::git_view::{GitEvent, GitView};
 use crate::layout::{self, Dock, Layout};
@@ -31,7 +33,7 @@ use crate::recent;
 
 actions!(
     workspace,
-    [Save, CloseTab, NextTab, PrevTab, Quit, ToggleGit, OpenFolder, QuickOpen, CommandPalette, ToggleTerminal, NewTerminal, ToggleSidebar, CloseFolder, ToggleTheme, GotoLine]
+    [Save, SaveAs, NewFile, CloseTab, NextTab, PrevTab, Quit, ToggleGit, OpenFolder, QuickOpen, CommandPalette, ToggleTerminal, NewTerminal, ToggleSidebar, CloseFolder, ToggleTheme, GotoLine]
 );
 
 /// Payload for dragging the terminal panel by its header to another dock.
@@ -77,7 +79,34 @@ struct Session {
     view: Entity<TerminalView>,
 }
 
+/// What the name prompt (opened from the sidebar menu) will do with the text typed.
+#[derive(Debug, Clone)]
+enum NameAction {
+    NewFile(PathBuf),
+    NewFolder(PathBuf),
+    Rename(PathBuf),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CtxAction {
+    NewFile,
+    NewFolder,
+    Rename,
+    Trash,
+    Reveal,
+    CopyPath,
+}
+
+/// The right-click menu of a sidebar row.
+struct CtxMenu {
+    pos: Point<Pixels>,
+    path: PathBuf,
+    is_dir: bool,
+    is_root: bool,
+}
+
 enum PaletteKind {
+    Name { placeholder: String, initial: String },
     GotoLine,
     ConfirmSwitch { dirty: usize, name: String },
     Files,
@@ -117,6 +146,12 @@ pub struct Workspace {
     message_gen: u64,
     pending_discard: Option<EntityId>,
     pending_quit: bool,
+    store: Option<Store>,
+    ctx_menu: Option<CtxMenu>,
+    pending_name: Option<NameAction>,
+    /// Buffer revision last written to the crash-recovery backup, per tab.
+    backup_revs: HashMap<EntityId, u64>,
+    last_session: Option<SessionState>,
     last_title: String,
     fs_rx: Option<Receiver<Changes>>,
     _watcher: Option<Watcher>,
@@ -152,6 +187,11 @@ impl Workspace {
             message_gen: 0,
             pending_discard: None,
             pending_quit: false,
+            store: Store::default_store(),
+            ctx_menu: None,
+            pending_name: None,
+            backup_revs: HashMap::new(),
+            last_session: None,
             last_title: String::new(),
             fs_rx: None,
             _watcher: None,
@@ -191,6 +231,20 @@ impl Workspace {
         cx.spawn(async move |this, cx| loop {
             cx.background_executor().timer(Duration::from_millis(200)).await;
             if this.update(cx, |ws, cx| ws.poll_fs(cx)).is_err() {
+                break;
+            }
+        })
+        .detach();
+        // Every few seconds: keep unsaved text safe and remember what is open.
+        cx.spawn(async move |this, cx| loop {
+            cx.background_executor().timer(Duration::from_secs(3)).await;
+            if this
+                .update(cx, |ws, cx| {
+                    ws.backup_tick(cx);
+                    ws.persist_session(cx);
+                })
+                .is_err()
+            {
                 break;
             }
         })
@@ -239,7 +293,10 @@ impl Workspace {
         perf::mark("open_folder: watcher started");
         self.close_palette(false);
         self.pending_quit = false;
+        self.persist_session(cx);
         if close_all {
+            // Anything unsaved was just confirmed as discarded.
+            self.discard_backups(cx);
             // Dropping a terminal view ends its session without blocking.
             self.tabs.clear();
             self.active = 0;
@@ -252,6 +309,7 @@ impl Workspace {
         self.git = None;
         self.git_view = None;
         self.show_git = false;
+        self.last_session = None;
         self.tree = Some(tree);
         self.root = Some(root.clone());
         self.fs_rx = fs_rx;
@@ -274,6 +332,7 @@ impl Workspace {
         }
         perf::mark("open_folder: git view ready");
         self.refresh_git(cx);
+        self.restore_session(window, cx);
         if let Some(path) = self.active_editor().and_then(|e| e.read(cx).path.clone()) {
             if let Some(t) = self.tree.as_mut() {
                 let _ = t.reveal(&path);
@@ -299,6 +358,7 @@ impl Workspace {
         if self.root.is_none() {
             return;
         }
+        self.persist_session(cx);
         self.root = None;
         self.tree = None;
         self.fs_rx = None;
@@ -358,12 +418,17 @@ impl Workspace {
         let Some(rx) = &self.fs_rx else { return };
         let mut any = false;
         let mut git = false;
+        let mut files = false;
         while let Ok(c) = rx.try_recv() {
             if let Some(t) = self.tree.as_mut() {
                 t.apply(&c);
             }
             git |= c.git || !c.paths.is_empty();
+            files |= !c.paths.is_empty();
             any = true;
+        }
+        if files {
+            self.check_open_files(cx);
         }
         if git {
             self.refresh_git(cx);
@@ -374,6 +439,415 @@ impl Workspace {
         if any {
             cx.notify();
         }
+    }
+
+    // ---- files changed on disk, session restore, crash recovery -------------------------------
+
+    /// An open file may have been changed by git, a formatter or an AI agent.
+    /// Clean buffers reload silently; buffers with unsaved edits show a bar and ask.
+    fn check_open_files(&mut self, cx: &mut Context<Self>) {
+        let mut notes = Vec::new();
+        for t in self.tabs.clone() {
+            let (check, name) = t.update(cx, |ed, cx| (ed.check_disk(cx), ed.title()));
+            match check {
+                DiskCheck::Reloaded => notes.push(format!("{name} reloaded: it changed on disk")),
+                DiskCheck::Deleted => notes.push(format!("{name} was deleted on disk")),
+                DiskCheck::Conflict => notes.push(format!("{name} changed on disk: choose Reload or Keep Mine")),
+                DiskCheck::Unchanged => {}
+            }
+        }
+        if let Some(n) = notes.into_iter().next() {
+            self.flash(n, cx);
+        }
+    }
+
+    fn resolve_conflict(&mut self, reload: bool, cx: &mut Context<Self>) {
+        let Some(editor) = self.active_editor().cloned() else { return };
+        if reload {
+            if let Err(e) = editor.update(cx, |ed, cx| ed.reload_from_disk(cx)) {
+                self.flash(e, cx);
+            }
+        } else {
+            editor.update(cx, |ed, cx| ed.keep_mine(cx));
+            self.flash("Keeping your version: saving will overwrite the file on disk", cx);
+        }
+    }
+
+    fn render_conflict_bar(&self, cx: &mut Context<Self>) -> gpui::Div {
+        let button = |id: &'static str, label: &'static str, reload: bool, cx: &mut Context<Self>| {
+            div()
+                .id(id)
+                .px(px(8.))
+                .h(px(20.))
+                .flex()
+                .items_center()
+                .rounded(px(3.))
+                .cursor_pointer()
+                .bg(rgba(0xffffff22))
+                .hover(|h| h.bg(rgba(0xffffff44)))
+                .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| this.resolve_conflict(reload, cx)))
+                .child(label)
+        };
+        div()
+            .h(px(28.))
+            .flex_none()
+            .flex()
+            .items_center()
+            .gap(px(8.))
+            .px(px(12.))
+            .bg(rgb(0x6b5a2a))
+            .text_color(rgb(0xf4ecd4))
+            .text_size(px(12.))
+            .child("This file changed on disk, and you have unsaved edits.")
+            .child(button("conflict-reload", "Reload from disk", true, cx))
+            .child(button("conflict-keep", "Keep mine", false, cx))
+    }
+
+    fn session_state(&self, cx: &App) -> SessionState {
+        let tabs: Vec<TabState> = self
+            .tabs
+            .iter()
+            .filter_map(|t| {
+                let ed = t.read(cx);
+                let path = ed.path.clone()?;
+                let (line, col, scroll_y) = ed.view_state();
+                Some(TabState { path, line, col, scroll_y: (scroll_y * 10.0).round() / 10.0 })
+            })
+            .collect();
+        let active_path = self.active_editor().and_then(|e| e.read(cx).path.clone());
+        let active = active_path.and_then(|p| tabs.iter().position(|t| t.path == p)).unwrap_or(0);
+        SessionState { tabs, active }
+    }
+
+    /// Write the list of open files and caret positions if it changed.
+    fn persist_session(&mut self, cx: &mut Context<Self>) {
+        if !self.config.restore_session {
+            return;
+        }
+        let (Some(store), Some(root)) = (&self.store, &self.root) else { return };
+        let state = self.session_state(cx);
+        if self.last_session.as_ref() == Some(&state) {
+            return;
+        }
+        store.save_session(root, &state);
+        self.last_session = Some(state);
+    }
+
+    /// Copy unsaved text to the backup folder (and remove backups of saved files).
+    fn backup_tick(&mut self, cx: &mut Context<Self>) {
+        const MAX_BACKUP_CHARS: usize = 4_000_000;
+        let (Some(store), Some(root)) = (&self.store, &self.root) else { return };
+        for t in &self.tabs {
+            let ed = t.read(cx);
+            let Some(path) = &ed.path else { continue };
+            let id = t.entity_id();
+            if ed.buffer.is_dirty() {
+                let rev = ed.buffer.revision();
+                if self.backup_revs.get(&id) == Some(&rev) || ed.buffer.len_chars() > MAX_BACKUP_CHARS {
+                    continue;
+                }
+                store.write_backup(root, path, &ed.buffer.text());
+                self.backup_revs.insert(id, rev);
+            } else if self.backup_revs.remove(&id).is_some() {
+                store.clear_backup(root, path);
+            }
+        }
+    }
+
+    /// The user chose to throw unsaved work away: forget its backups too.
+    fn discard_backups(&mut self, cx: &mut Context<Self>) {
+        if let (Some(store), Some(root)) = (&self.store, &self.root) {
+            for t in &self.tabs {
+                if let Some(path) = &t.read(cx).path {
+                    store.clear_backup(root, path);
+                }
+            }
+        }
+        self.backup_revs.clear();
+    }
+
+    /// Reopen last time's files at their caret positions and offer back unsaved text.
+    fn restore_session(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let skip = std::env::vars_os().any(|(k, _)| k.to_string_lossy().starts_with("MIDE_PERF"));
+        if skip || !self.config.restore_session || !self.tabs.is_empty() {
+            return;
+        }
+        let (Some(root), Some(store)) = (self.root.clone(), self.store.as_ref()) else { return };
+        let state = store.load_session(&root);
+        let backups = store.backups(&root);
+        let active_path = state.tabs.get(state.active).map(|t| t.path.clone());
+        for tab in &state.tabs {
+            self.open_file(&tab.path, window, cx);
+            if let Some(ed) = self.tabs.last() {
+                ed.update(cx, |ed, _| ed.restore_view(tab.line, tab.col, tab.scroll_y));
+            }
+        }
+        let mut recovered = 0;
+        for (file, text) in backups {
+            let Some(store) = self.store.as_ref() else { break };
+            // A backup identical to the file on disk is stale: drop it.
+            if !file.is_file() || Buffer::open(&file).is_ok_and(|b| b.text() == text) {
+                store.clear_backup(&root, &file);
+                continue;
+            }
+            self.open_file(&file, window, cx);
+            let canon = file.canonicalize().unwrap_or(file);
+            if let Some(ed) = self.tabs.iter().find(|t| t.read(cx).path.as_deref() == Some(canon.as_path())).cloned() {
+                ed.update(cx, |ed, cx| ed.restore_unsaved(&text, cx));
+                let rev = ed.read(cx).buffer.revision();
+                self.backup_revs.insert(ed.entity_id(), rev);
+                recovered += 1;
+            }
+        }
+        if let Some(i) = active_path.and_then(|p| self.tabs.iter().position(|t| t.read(cx).path.as_ref() == Some(&p))) {
+            self.activate(i, window, cx);
+        }
+        if recovered > 0 {
+            self.flash(format!("Recovered unsaved changes in {recovered} file{}", plural(recovered)), cx);
+        }
+    }
+
+    // ---- sidebar: context menu and file operations ----------------------------------------------
+
+    fn ctx_items(menu: &CtxMenu) -> Vec<(&'static str, CtxAction)> {
+        let mut v = Vec::new();
+        if menu.is_dir {
+            v.push(("New File…", CtxAction::NewFile));
+            v.push(("New Folder…", CtxAction::NewFolder));
+        }
+        if !menu.is_root {
+            v.push(("Rename…", CtxAction::Rename));
+        }
+        v.push(("Reveal in Finder", CtxAction::Reveal));
+        v.push(("Copy Path", CtxAction::CopyPath));
+        if !menu.is_root {
+            v.push(("Move to Trash", CtxAction::Trash));
+        }
+        v
+    }
+
+    fn run_ctx(&mut self, action: CtxAction, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(menu) = self.ctx_menu.take() else { return };
+        let dir = if menu.is_dir { menu.path.clone() } else { menu.path.parent().map(Path::to_owned).unwrap_or_default() };
+        match action {
+            CtxAction::NewFile => self.prompt_name(
+                NameAction::NewFile(dir),
+                "New file name (folders/ allowed)",
+                "",
+                window,
+                cx,
+            ),
+            CtxAction::NewFolder => self.prompt_name(NameAction::NewFolder(dir), "New folder name", "", window, cx),
+            CtxAction::Rename => {
+                let name = menu.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                self.prompt_name(NameAction::Rename(menu.path), "New name", &name, window, cx);
+            }
+            CtxAction::Reveal => cx.reveal_path(&menu.path),
+            CtxAction::CopyPath => {
+                cx.write_to_clipboard(ClipboardItem::new_string(menu.path.to_string_lossy().into_owned()));
+                self.flash("Path copied", cx);
+            }
+            CtxAction::Trash => self.trash(&menu.path, window, cx),
+        }
+        cx.notify();
+    }
+
+    fn prompt_name(&mut self, action: NameAction, placeholder: &str, initial: &str, window: &mut Window, cx: &mut Context<Self>) {
+        self.close_palette(false);
+        self.pending_name = Some(action);
+        self.open_palette(
+            PaletteKind::Name { placeholder: placeholder.to_owned(), initial: initial.to_owned() },
+            window,
+            cx,
+        );
+    }
+
+    /// A relative name with no empty parts, `..`, or absolute prefix.
+    fn valid_relative(name: &str) -> Option<PathBuf> {
+        let name = name.trim().trim_matches('/');
+        if name.is_empty() {
+            return None;
+        }
+        let mut out = PathBuf::new();
+        for part in name.split('/') {
+            if part.is_empty() || part == "." || part == ".." {
+                return None;
+            }
+            out.push(part);
+        }
+        Some(out)
+    }
+
+    fn apply_name(&mut self, action: NameAction, text: String, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(rel) = Self::valid_relative(&text) else {
+            return self.flash("That is not a valid name", cx);
+        };
+        match action {
+            NameAction::NewFile(dir) => {
+                let path = dir.join(&rel);
+                if path.exists() {
+                    return self.flash(format!("{} already exists", rel.display()), cx);
+                }
+                let made = path
+                    .parent()
+                    .map_or(Ok(()), std::fs::create_dir_all)
+                    .and_then(|()| std::fs::OpenOptions::new().write(true).create_new(true).open(&path).map(drop));
+                match made {
+                    Ok(()) => {
+                        self.refresh_around(&path);
+                        self.open_file(&path, window, cx);
+                    }
+                    Err(e) => self.flash(format!("Cannot create {}: {e}", rel.display()), cx),
+                }
+            }
+            NameAction::NewFolder(dir) => {
+                let path = dir.join(&rel);
+                if path.exists() {
+                    return self.flash(format!("{} already exists", rel.display()), cx);
+                }
+                match std::fs::create_dir_all(&path) {
+                    Ok(()) => {
+                        self.refresh_around(&path);
+                        if let Some(t) = self.tree.as_mut() {
+                            if !t.is_expanded(&path) {
+                                let _ = t.toggle(&path);
+                            }
+                        }
+                    }
+                    Err(e) => self.flash(format!("Cannot create {}: {e}", rel.display()), cx),
+                }
+            }
+            NameAction::Rename(old) => {
+                if rel.components().count() != 1 {
+                    return self.flash("A name cannot contain “/”", cx);
+                }
+                let new = old.with_file_name(&rel);
+                if new == old {
+                    return;
+                }
+                if new.exists() {
+                    return self.flash(format!("{} already exists", rel.display()), cx);
+                }
+                if let Err(e) = std::fs::rename(&old, &new) {
+                    return self.flash(format!("Cannot rename: {e}"), cx);
+                }
+                // Open tabs follow the file (and keep their unsaved edits).
+                for t in self.tabs.clone() {
+                    let moved = t.read(cx).path.as_ref().and_then(|p| p.strip_prefix(&old).ok().map(|r| new.join(r)));
+                    if let Some(np) = moved {
+                        if let (Some(store), Some(root), Some(op)) = (&self.store, &self.root, &t.read(cx).path) {
+                            store.clear_backup(root, op);
+                        }
+                        self.backup_revs.remove(&t.entity_id());
+                        t.update(cx, |ed, cx| ed.set_path(np, cx));
+                    }
+                }
+                self.refresh_around(&old);
+                self.refresh_around(&new);
+                self.refresh_git(cx);
+                self.flash(format!("Renamed to {}", rel.display()), cx);
+            }
+        }
+    }
+
+    /// Re-read the folder that contains `path` so the sidebar shows the change now.
+    fn refresh_around(&mut self, path: &Path) {
+        if let Some(t) = self.tree.as_mut() {
+            for a in path.ancestors().skip(1) {
+                t.refresh(a);
+                if Some(a) == self.root.as_deref() {
+                    break;
+                }
+            }
+            let _ = t.reveal(path);
+        }
+    }
+
+    fn trash(&mut self, path: &Path, window: &mut Window, cx: &mut Context<Self>) {
+        let affected: Vec<usize> = self
+            .tabs
+            .iter()
+            .enumerate()
+            .filter(|(_, t)| t.read(cx).path.as_ref().is_some_and(|p| p.starts_with(path)))
+            .map(|(i, _)| i)
+            .collect();
+        if affected.iter().any(|&i| self.tabs[i].read(cx).buffer.is_dirty()) {
+            return self.flash("It has unsaved changes in an open tab: save or close it first", cx);
+        }
+        let script = format!(
+            "tell application \"Finder\" to delete POSIX file \"{}\"",
+            path.to_string_lossy().replace('\\', "\\\\").replace('"', "\\\"")
+        );
+        match std::process::Command::new("osascript").arg("-e").arg(script).output() {
+            Ok(o) if o.status.success() => {
+                for i in affected.into_iter().rev() {
+                    self.remove_tab(i, window, cx);
+                }
+                self.refresh_around(path);
+                self.refresh_git(cx);
+                let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                self.flash(format!("Moved {name} to the Trash"), cx);
+            }
+            Ok(o) => self.flash(format!("Cannot move to Trash: {}", String::from_utf8_lossy(&o.stderr).trim()), cx),
+            Err(e) => self.flash(format!("Cannot move to Trash: {e}"), cx),
+        }
+    }
+
+    fn render_ctx_menu(&self, cx: &mut Context<Self>) -> Option<gpui::Div> {
+        let menu = self.ctx_menu.as_ref()?;
+        let items = Self::ctx_items(menu);
+        let pos = menu.pos;
+        Some(
+            div()
+                .absolute()
+                .top_0()
+                .left_0()
+                .size_full()
+                .occlude()
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, _, _, cx| {
+                        this.ctx_menu = None;
+                        cx.notify();
+                    }),
+                )
+                .on_mouse_down(
+                    MouseButton::Right,
+                    cx.listener(|this, _, _, cx| {
+                        this.ctx_menu = None;
+                        cx.notify();
+                    }),
+                )
+                .child(
+                    div()
+                        .absolute()
+                        .left(pos.x)
+                        .top(pos.y)
+                        .w(px(180.))
+                        .py(px(4.))
+                        .rounded(px(6.))
+                        .border_1()
+                        .border_color(rgb(ui().pal_border))
+                        .bg(rgb(ui().pal_bg))
+                        .text_color(rgb(ui().pal_text))
+                        .text_size(px(12.))
+                        .shadow_lg()
+                        .children(items.into_iter().enumerate().map(|(i, (label, action))| {
+                            div()
+                                .id(("ctx", i))
+                                .h(px(24.))
+                                .px(px(12.))
+                                .flex()
+                                .items_center()
+                                .cursor_pointer()
+                                .hover(|h| h.bg(rgb(ui().pal_selected)))
+                                .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                                    this.run_ctx(action, window, cx)
+                                }))
+                                .child(label)
+                        })),
+                ),
+        )
     }
 
     fn flash(&mut self, msg: impl Into<SharedString>, cx: &mut Context<Self>) {
@@ -407,6 +881,11 @@ impl Workspace {
         }
         let buffer = match Buffer::open(&path) {
             Ok(b) => b,
+            Err(e) if e.kind() == std::io::ErrorKind::InvalidData && e.to_string() == "binary file" => {
+                let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                self.flash(format!("{name} is a binary file: mide only opens text"), cx);
+                return;
+            }
             Err(e) => {
                 self.flash(format!("Cannot open {}: {e}", path.display()), cx);
                 return;
@@ -454,6 +933,19 @@ impl Workspace {
             self.flash("Unsaved changes: click × or press ⌘W again to discard them", cx);
             return;
         }
+        self.remove_tab(i, window, cx);
+    }
+
+    /// Close tab `i` without asking: the caller already dealt with unsaved changes.
+    fn remove_tab(&mut self, i: usize, window: &mut Window, cx: &mut Context<Self>) {
+        if i >= self.tabs.len() {
+            return;
+        }
+        let editor = self.tabs[i].clone();
+        if let (Some(store), Some(root), Some(path)) = (&self.store, &self.root, &editor.read(cx).path) {
+            store.clear_backup(root, path);
+        }
+        self.backup_revs.remove(&editor.entity_id());
         self.pending_discard = None;
         self.tabs.remove(i);
         if i < self.active || self.active >= self.tabs.len() {
@@ -479,8 +971,74 @@ impl Workspace {
         }
     }
 
-    fn save(&mut self, _: &Save, _: &mut Window, cx: &mut Context<Self>) {
+    fn new_file(&mut self, _: &NewFile, window: &mut Window, cx: &mut Context<Self>) {
+        let (syntaxes, theme) = (self.syntaxes.clone(), self.theme.clone());
+        let editor = cx.new(|cx| EditorView::new(Buffer::default(), None, syntaxes, theme, cx));
+        cx.observe(&editor, |_, _, cx| cx.notify()).detach();
+        self.tabs.push(editor);
+        self.activate(self.tabs.len() - 1, window, cx);
+    }
+
+    fn save_as(&mut self, _: &SaveAs, window: &mut Window, cx: &mut Context<Self>) {
         let Some(editor) = self.active_editor().cloned() else { return };
+        let (dir, name) = {
+            let ed = editor.read(cx);
+            let dir = ed
+                .path
+                .as_deref()
+                .and_then(Path::parent)
+                .map(Path::to_owned)
+                .or_else(|| self.root.clone())
+                .or_else(|| std::env::var_os("HOME").map(PathBuf::from))
+                .unwrap_or_else(|| PathBuf::from("/"));
+            (dir, ed.title())
+        };
+        let rx = cx.prompt_for_new_path(&dir, Some(&name));
+        cx.spawn_in(window, async move |this, cx| {
+            if let Ok(Ok(Some(path))) = rx.await {
+                let _ = this.update_in(cx, |ws, window, cx| ws.finish_save_as(editor, path, window, cx));
+            }
+        })
+        .detach();
+    }
+
+    fn finish_save_as(&mut self, editor: Entity<EditorView>, path: PathBuf, _: &mut Window, cx: &mut Context<Self>) {
+        let canon = path.parent().and_then(|d| d.canonicalize().ok()).zip(path.file_name()).map(|(d, n)| d.join(n));
+        let path = canon.unwrap_or(path);
+        let taken = self
+            .tabs
+            .iter()
+            .any(|t| t.entity_id() != editor.entity_id() && t.read(cx).path.as_deref() == Some(path.as_path()));
+        if taken {
+            self.flash("That file is already open in another tab: close it first", cx);
+            return;
+        }
+        let old = editor.read(cx).path.clone();
+        match editor.update(cx, |ed, cx| ed.save_as(path.clone(), cx)) {
+            Ok(()) => {
+                if let (Some(store), Some(root), Some(old)) = (&self.store, &self.root, old) {
+                    store.clear_backup(root, &old);
+                }
+                if let Some(t) = self.tree.as_mut() {
+                    if let Some(dir) = path.parent() {
+                        t.refresh(dir);
+                    }
+                    let _ = t.reveal(&path);
+                }
+                let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                self.flash(format!("Saved {name}"), cx);
+                self.refresh_git(cx);
+                self.persist_session(cx);
+            }
+            Err(e) => self.flash(e, cx),
+        }
+    }
+
+    fn save(&mut self, _: &Save, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(editor) = self.active_editor().cloned() else { return };
+        if editor.read(cx).path.is_none() {
+            return self.save_as(&SaveAs, window, cx);
+        }
         let result = editor.update(cx, |ed, cx| ed.save(cx).map(|()| ed.title()));
         let saved_path = editor.read(cx).path.clone();
         match result {
@@ -973,8 +1531,13 @@ impl Workspace {
             self.refocus_after_palette(window, cx);
             return;
         }
+        let name_prompt = match &kind {
+            PaletteKind::Name { placeholder, initial } => Some((placeholder.clone(), initial.clone())),
+            _ => None,
+        };
         let goto = matches!(kind, PaletteKind::GotoLine);
         let (items, text_kind, placeholder) = match kind {
+            PaletteKind::Name { .. } => (Vec::new(), Kind::Text, ""),
             PaletteKind::GotoLine => (Vec::new(), Kind::Text, "Go to line (e.g. 120 or 120:8)"),
             PaletteKind::ConfirmSwitch { dirty, name } => {
                 let items = vec![
@@ -1016,7 +1579,9 @@ impl Workspace {
                 (items, Kind::Text, "New terminal session…")
             }
         };
-        let palette = if goto {
+        let palette = if let Some((ph, init)) = name_prompt {
+            cx.new(|cx| Palette::input_with(&ph, &init, cx))
+        } else if goto {
             cx.new(|cx| Palette::input(placeholder, cx))
         } else {
             cx.new(|cx| Palette::new(items, text_kind, placeholder, cx))
@@ -1024,6 +1589,7 @@ impl Workspace {
         cx.subscribe_in(&palette, window, |ws, _, ev: &PaletteEvent, window, cx| match ev {
             PaletteEvent::Dismissed => {
                 ws.pending_open = None;
+                ws.pending_name = None;
                 ws.close_palette(true);
                 ws.refocus_after_palette(window, cx);
                 cx.notify();
@@ -1063,7 +1629,10 @@ impl Workspace {
             cmd("File: Close Folder", "", Command::CloseFolder),
             cmd("File: Go to File…", "⌘P", Command::QuickOpen),
             cmd("Edit: Go to Line…", "⌃G", Command::GotoLine),
+            cmd("File: New File", "⌘N", Command::NewFile),
             cmd("File: Save", "⌘S", Command::Save),
+            cmd("File: Save As…", "⇧⌘S", Command::SaveAs),
+            cmd("File: Reload from Disk", "", Command::ReloadFromDisk),
             cmd("File: Close Tab", "⌘W", Command::CloseTab),
             cmd("View: Next Tab", "⌃Tab", Command::NextTab),
             cmd("View: Previous Tab", "⌃⇧Tab", Command::PrevTab),
@@ -1106,6 +1675,11 @@ impl Workspace {
                     self.switch_folder(path, true, window, cx);
                 }
             }
+            Choice::Text(text) if self.pending_name.is_some() => {
+                if let Some(action) = self.pending_name.take() {
+                    self.apply_name(action, text, window, cx);
+                }
+            }
             Choice::Text(text) => match parse_goto(&text) {
                 Some((line, col)) => {
                     if let Some(ed) = self.active_editor().cloned() {
@@ -1122,7 +1696,17 @@ impl Workspace {
                 Command::QuickOpen => self.open_palette(PaletteKind::Files, window, cx),
                 Command::GotoLine if self.active_editor().is_some() => self.open_palette(PaletteKind::GotoLine, window, cx),
                 Command::GotoLine => {}
+                Command::NewFile => self.new_file(&NewFile, window, cx),
                 Command::Save => self.save(&Save, window, cx),
+                Command::SaveAs => self.save_as(&SaveAs, window, cx),
+                Command::ReloadFromDisk => {
+                    if let Some(ed) = self.active_editor().cloned() {
+                        match ed.update(cx, |ed, cx| ed.reload_from_disk(cx)) {
+                            Ok(()) => self.flash("Reloaded from disk", cx),
+                            Err(e) => self.flash(e, cx),
+                        }
+                    }
+                }
                 Command::CloseTab => self.close_tab(self.active, window, cx),
                 Command::NextTab => self.next_tab(&NextTab, window, cx),
                 Command::PrevTab => self.prev_tab(&PrevTab, window, cx),
@@ -1157,6 +1741,10 @@ impl Workspace {
             self.pending_quit = true;
             self.flash(format!("{dirty} unsaved file(s): press ⌘Q again to quit and discard changes"), cx);
             return;
+        }
+        self.persist_session(cx);
+        if dirty > 0 {
+            self.discard_backups(cx);
         }
         cx.quit();
     }
@@ -1220,6 +1808,7 @@ impl Workspace {
                         };
                         let icon_color = if row.ignored { ui().icon_dim } else { ui().icon };
                         let (path, is_dir) = (row.path.clone(), row.is_dir);
+                        let ctx_path = row.path.clone();
                         div()
                             .id(("row", i))
                             .h(px(ROW_HEIGHT))
@@ -1234,6 +1823,18 @@ impl Workspace {
                             .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
                                 this.click_row(path.clone(), is_dir, window, cx)
                             }))
+                            .on_mouse_down(
+                                MouseButton::Right,
+                                cx.listener(move |this, e: &MouseDownEvent, _, cx| {
+                                    this.ctx_menu = Some(CtxMenu {
+                                        pos: e.position,
+                                        path: ctx_path.clone(),
+                                        is_dir,
+                                        is_root: i == 0,
+                                    });
+                                    cx.notify();
+                                }),
+                            )
                             .child(
                                 div().w(px(12.)).h(px(12.)).flex_none().when_some(arrow, |d, a| {
                                     d.child(svg().path(a).size(px(12.)).text_color(rgb(ui().icon)))
@@ -1560,6 +2161,7 @@ impl Render for Workspace {
                 .child("Open a file from the sidebar"),
         };
 
+        let conflict = self.active_editor().is_some_and(|e| e.read(cx).disk_conflict);
         let term_visible = self.show_term && !self.terminals.is_empty();
         let dock = self.layout.terminal_dock;
         let main_area = match (&self.git_view, self.show_git) {
@@ -1573,6 +2175,7 @@ impl Render for Workspace {
                     .flex()
                     .flex_col()
                     .child(self.render_tabs(cx))
+                    .children(conflict.then(|| self.render_conflict_bar(cx)))
                     .child(editor_area);
                 if term_visible && dock == Dock::Bottom {
                     editor_col = editor_col
@@ -1609,6 +2212,8 @@ impl Render for Workspace {
             .key_context("Workspace")
             .track_focus(&self.focus_handle)
             .on_action(cx.listener(Self::save))
+            .on_action(cx.listener(Self::save_as))
+            .on_action(cx.listener(Self::new_file))
             .on_action(cx.listener(Self::close_active))
             .on_action(cx.listener(Self::next_tab))
             .on_action(cx.listener(Self::prev_tab))
@@ -1658,6 +2263,7 @@ impl Render for Workspace {
                     .child(right),
             )
             .when(dragging_panel, |d| d.child(self.render_drop_zones(cx)))
+            .children(self.render_ctx_menu(cx))
             .children(self.palette.clone().map(|palette| {
                 // Full-window backdrop: clicking outside the palette dismisses it.
                 div()

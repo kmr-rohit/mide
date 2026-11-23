@@ -10,6 +10,7 @@ mod layout;
 mod palette;
 mod perf;
 mod recent;
+mod session;
 mod terminal_view;
 mod theme;
 mod trust;
@@ -91,7 +92,9 @@ fn set_menus(cx: &mut App) {
                 MenuItem::action("Close Folder", CloseFolder),
                 MenuItem::action("Go to File…", QuickOpen),
                 MenuItem::separator(),
+                MenuItem::action("New File", NewFile),
                 MenuItem::action("Save", Save),
+                MenuItem::action("Save As…", SaveAs),
                 MenuItem::action("Close Tab", CloseTab),
             ],
         },
@@ -206,6 +209,8 @@ fn bind_keys(cx: &mut App) {
         KeyBinding::new("cmd-d", AddNextOccurrence, ed),
         KeyBinding::new("ctrl-cmd-g", SelectAllOccurrences, ed),
         KeyBinding::new("cmd-s", Save, None),
+        KeyBinding::new("cmd-shift-s", SaveAs, None),
+        KeyBinding::new("cmd-n", NewFile, None),
         KeyBinding::new("cmd-w", CloseTab, None),
         KeyBinding::new("cmd-shift-]", NextTab, None),
         KeyBinding::new("cmd-shift-[", PrevTab, None),

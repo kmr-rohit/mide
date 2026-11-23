@@ -22,7 +22,10 @@ pub enum Command {
     CloseFolder,
     QuickOpen,
     GotoLine,
+    NewFile,
     Save,
+    SaveAs,
+    ReloadFromDisk,
     CloseTab,
     NextTab,
     PrevTab,
@@ -113,6 +116,13 @@ impl Palette {
     pub fn input(placeholder: &str, cx: &mut Context<Self>) -> Self {
         let mut p = Self::new(Vec::new(), Kind::Text, placeholder, cx);
         p.free_text = true;
+        p
+    }
+
+    /// Like `input`, with text already typed (used by Rename).
+    pub fn input_with(placeholder: &str, initial: &str, cx: &mut Context<Self>) -> Self {
+        let mut p = Self::input(placeholder, cx);
+        p.query = initial.to_owned();
         p
     }
 

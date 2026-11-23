@@ -3,9 +3,9 @@
 
 use std::collections::BTreeMap;
 use std::ops::Range;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Instant, SystemTime};
 
 use gpui::{
     actions, div, fill, point, prelude::*, px, relative, size, App, Bounds, ClipboardItem, ContentMask,
@@ -165,9 +165,38 @@ struct Layout {
     rows: Vec<Row>,
 }
 
+/// What a file looked like when we last read or wrote it; a different value later
+/// means something else changed it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DiskSig {
+    mtime: Option<SystemTime>,
+    len: u64,
+}
+
+pub fn disk_sig(path: &Path) -> Option<DiskSig> {
+    let m = std::fs::metadata(path).ok()?;
+    Some(DiskSig { mtime: m.modified().ok(), len: m.len() })
+}
+
+/// What `check_disk` did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiskCheck {
+    Unchanged,
+    /// The buffer was clean, so it silently picked up the new text.
+    Reloaded,
+    /// The buffer has unsaved edits and the file changed too: the user must choose.
+    Conflict,
+    /// The file is gone.
+    Deleted,
+}
+
 pub struct EditorView {
     pub buffer: Buffer,
     pub path: Option<PathBuf>,
+    syntaxes: Arc<Syntaxes>,
+    disk: Option<DiskSig>,
+    /// The file changed on disk while this buffer has unsaved edits.
+    pub disk_conflict: bool,
     pub syntax_name: String,
     /// Line numbers on/off (off for embedded boxes like the commit message).
     pub show_gutter: bool,
@@ -206,9 +235,13 @@ impl EditorView {
         cx: &mut Context<Self>,
     ) -> Self {
         let syntax_name = syntaxes.detect(path.as_deref(), &buffer.line(0));
-        let highlighter = DocHighlighter::new(syntaxes, theme.clone(), &syntax_name);
+        let highlighter = DocHighlighter::new(syntaxes.clone(), theme.clone(), &syntax_name);
+        let disk = path.as_deref().and_then(disk_sig);
         Self {
             buffer,
+            syntaxes,
+            disk,
+            disk_conflict: false,
             path,
             syntax_name,
             show_gutter: true,
@@ -276,10 +309,122 @@ impl EditorView {
     }
 
     pub fn save(&mut self, cx: &mut Context<Self>) -> Result<(), String> {
-        let path = self.path.clone().ok_or("No file name (Save As is not implemented yet)")?;
+        let path = self.path.clone().ok_or("This file has no name yet: use File ▸ Save As (⇧⌘S)")?;
+        if self.disk_conflict {
+            return Err("The file changed on disk: choose Reload or Keep Mine in the bar above first".into());
+        }
         self.buffer.save(&path).map_err(|e| format!("Save failed: {e}"))?;
+        self.disk = disk_sig(&path);
         cx.notify();
         Ok(())
+    }
+
+    /// Write to a new path (Save As) and make that the document's file.
+    pub fn save_as(&mut self, path: PathBuf, cx: &mut Context<Self>) -> Result<(), String> {
+        self.buffer.save(&path).map_err(|e| format!("Save failed: {e}"))?;
+        self.set_path(path, cx);
+        Ok(())
+    }
+
+    /// Point this document at another file (after Save As or a rename in the sidebar).
+    pub fn set_path(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+        self.syntax_name = self.syntaxes.detect(Some(&path), &self.buffer.line(0));
+        self.highlighter = DocHighlighter::new(self.syntaxes.clone(), self.theme.clone(), &self.syntax_name);
+        self.line_spans.clear();
+        self.approx_spans.clear();
+        self.disk = disk_sig(&path);
+        self.disk_conflict = false;
+        self.path = Some(path);
+        cx.notify();
+    }
+
+    /// Compare with the file on disk and react (see `DiskCheck`).
+    pub fn check_disk(&mut self, cx: &mut Context<Self>) -> DiskCheck {
+        let Some(path) = self.path.clone() else { return DiskCheck::Unchanged };
+        let now = disk_sig(&path);
+        if now == self.disk {
+            return DiskCheck::Unchanged;
+        }
+        let Some(now) = now else {
+            self.disk = None;
+            return DiskCheck::Deleted;
+        };
+        if self.buffer.is_dirty() {
+            if !self.disk_conflict {
+                self.disk_conflict = true;
+                cx.notify();
+            }
+            return DiskCheck::Conflict;
+        }
+        match Buffer::open(&path) {
+            Ok(fresh) => {
+                self.replace_buffer(fresh);
+                self.disk = Some(now);
+                cx.notify();
+                DiskCheck::Reloaded
+            }
+            // Mid-write or unreadable right now; the next change event retries.
+            Err(_) => DiskCheck::Unchanged,
+        }
+    }
+
+    /// Throw away unsaved edits and read the file again.
+    pub fn reload_from_disk(&mut self, cx: &mut Context<Self>) -> Result<(), String> {
+        let path = self.path.clone().ok_or("No file to reload")?;
+        let fresh = Buffer::open(&path).map_err(|e| format!("Cannot reload: {e}"))?;
+        self.replace_buffer(fresh);
+        self.disk = disk_sig(&path);
+        self.disk_conflict = false;
+        cx.notify();
+        Ok(())
+    }
+
+    /// Keep the unsaved text; the next save overwrites the file on disk.
+    pub fn keep_mine(&mut self, cx: &mut Context<Self>) {
+        self.disk = self.path.as_deref().and_then(disk_sig);
+        self.disk_conflict = false;
+        cx.notify();
+    }
+
+    /// Swap in new text but stay where the caret was (by line and column).
+    fn replace_buffer(&mut self, mut fresh: Buffer) {
+        let (line, col) = self.buffer.line_col(self.buffer.selections().last().map_or(0, |s| s.head));
+        let line = line.min(fresh.len_lines().saturating_sub(1));
+        let at = fresh.offset_of(line, col.min(fresh.line_len(line)));
+        fresh.set_cursor(at);
+        self.buffer = fresh;
+        self.line_spans.clear();
+        self.approx_spans.clear();
+        self.highlighter.invalidate_from(0);
+        self.marked = None;
+        self.find_matches.clear();
+        if self.find_bar.is_some() {
+            self.find_origin = at;
+        }
+    }
+
+    /// Replace the text with recovered, unsaved content (the buffer shows as modified).
+    pub fn restore_unsaved(&mut self, text: &str, cx: &mut Context<Self>) {
+        self.buffer.select_all();
+        self.buffer.insert(text);
+        self.after_edit(cx);
+        self.buffer.set_cursor(0);
+        self.scroll_y = 0.0;
+    }
+
+    /// Caret (0-based line, col) and vertical scroll, for the saved session.
+    pub fn view_state(&self) -> (usize, usize, f32) {
+        let head = self.buffer.selections().last().map_or(0, |s| s.head);
+        let (l, c) = self.buffer.line_col(head);
+        (l, c, self.scroll_y)
+    }
+
+    /// Put the caret at (line, col) and restore the scroll offset.
+    pub fn restore_view(&mut self, line: usize, col: usize, scroll_y: f32) {
+        let line = line.min(self.buffer.len_lines().saturating_sub(1));
+        let at = self.buffer.offset_of(line, col.min(self.buffer.line_len(line)));
+        self.buffer.set_cursor(at);
+        self.scroll_y = scroll_y.max(0.0);
     }
 
     // ---- change bookkeeping --------------------------------------------------

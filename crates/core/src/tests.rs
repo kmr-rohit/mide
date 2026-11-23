@@ -277,3 +277,17 @@ fn with_line_matches_line_for_every_line() {
         assert_eq!(b.with_line(i, str::to_owned), b.line(i), "line {i}");
     }
 }
+
+#[test]
+fn binary_files_are_refused_without_reading_them_fully() {
+    let dir = std::env::temp_dir().join(format!("mide-bin-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let bin = dir.join("a.bin");
+    std::fs::write(&bin, b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR").unwrap();
+    let err = Buffer::open(&bin).err().expect("binary must be refused");
+    assert_eq!(err.to_string(), "binary file");
+    let txt = dir.join("a.txt");
+    std::fs::write(&txt, "hello\n").unwrap();
+    assert_eq!(Buffer::open(&txt).unwrap().text(), "hello\n");
+    let _ = std::fs::remove_dir_all(&dir);
+}

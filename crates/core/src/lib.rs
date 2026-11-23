@@ -139,6 +139,17 @@ impl Buffer {
     // ---- files -----------------------------------------------------------
 
     pub fn open(path: impl AsRef<Path>) -> io::Result<Self> {
+        let path = path.as_ref();
+        // A NUL byte in the first 8 KiB means this is not text (image, archive, executable).
+        // Checked before reading the rest so a huge binary is never pulled into memory.
+        {
+            use std::io::Read;
+            let mut head = Vec::with_capacity(8192);
+            std::fs::File::open(path)?.take(8192).read_to_end(&mut head)?;
+            if head.contains(&0) {
+                return Err(io::Error::new(io::ErrorKind::InvalidData, "binary file"));
+            }
+        }
         let bytes = std::fs::read(path)?;
         let (text, lossy) = match String::from_utf8(bytes) {
             Ok(s) => (s, false),

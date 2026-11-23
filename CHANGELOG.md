@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+Data safety (the P0 items from the product review):
+
+* Files changed on disk (by git, a formatter, an AI agent) are noticed. Clean tabs reload by themselves; a tab with unsaved edits shows a bar to **Reload** or **Keep mine**, and saving is blocked until you choose.
+* Session restore: reopening a folder brings back its tabs, caret positions and scroll offsets (`[workspace] restore_session`).
+* Crash recovery: unsaved text is backed up every few seconds and offered back after a crash.
+* New File (⌘N), Save As (⇧⌘S), and a sidebar right-click menu: new file/folder, rename, reveal in Finder, copy path, move to Trash.
+* Binary files are refused before they are read into memory.
+
 ## 0.1.0
 
 First public release.

@@ -1134,6 +1134,10 @@ impl Workspace {
                         .text_color(rgb(ui().pal_text))
                         .text_size(px(12.))
                         .shadow_lg()
+                        // A press on the menu itself must not reach the dismiss-on-click backdrop,
+                        // or the menu is gone before the click on an entry completes.
+                        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                        .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
                         .children(rows),
                 ),
         )

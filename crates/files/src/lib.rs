@@ -9,6 +9,7 @@ pub use search::{search, Hit, Summary};
 use std::collections::{HashMap, HashSet};
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use ignore::gitignore::{Gitignore, GitignoreBuilder};
 use ignore::WalkBuilder;
@@ -41,7 +42,11 @@ pub struct Row {
     pub ignored: bool,
 }
 
+/// Source of tree versions: unique across trees, so a cache never mistakes a new folder for the old one.
+static VERSIONS: AtomicU64 = AtomicU64::new(1);
+
 pub struct FileTree {
+    version: u64,
     root: PathBuf,
     /// Loaded directory listings, sorted.
     children: HashMap<PathBuf, Vec<Entry>>,
@@ -59,7 +64,7 @@ impl FileTree {
         let _ = b.add(root.join(".git/info/exclude"));
         let ignore = b.build().unwrap_or_else(|_| Gitignore::empty());
 
-        let mut tree = Self { root: root.clone(), children: HashMap::new(), expanded: HashSet::new(), ignore };
+        let mut tree = Self { version: VERSIONS.fetch_add(1, Ordering::Relaxed), root: root.clone(), children: HashMap::new(), expanded: HashSet::new(), ignore };
         tree.load(&root)?;
         tree.expanded.insert(root);
         Ok(tree)
@@ -67,6 +72,15 @@ impl FileTree {
 
     pub fn root(&self) -> &Path {
         &self.root
+    }
+
+    /// Changes whenever the visible rows might: lets callers cache `rows()`.
+    pub fn version(&self) -> u64 {
+        self.version
+    }
+
+    fn bump(&mut self) {
+        self.version = VERSIONS.fetch_add(1, Ordering::Relaxed);
     }
 
     fn load(&mut self, dir: &Path) -> io::Result<()> {
@@ -90,6 +104,7 @@ impl FileTree {
                 .then_with(|| a.name.cmp(&b.name))
         });
         self.children.insert(dir.to_owned(), entries);
+        self.bump();
         Ok(())
     }
 
@@ -99,6 +114,7 @@ impl FileTree {
 
     /// Expand or collapse a directory, loading it on first expansion.
     pub fn toggle(&mut self, path: &Path) -> io::Result<()> {
+        self.bump();
         if self.expanded.remove(path) {
             return Ok(());
         }
@@ -121,6 +137,7 @@ impl FileTree {
             }
             self.expanded.insert(cur.clone());
         }
+        self.bump();
         Ok(())
     }
 
@@ -146,6 +163,7 @@ impl FileTree {
     fn forget(&mut self, dir: &Path) {
         self.children.retain(|p, _| !p.starts_with(dir));
         self.expanded.retain(|p| !p.starts_with(dir));
+        self.bump();
     }
 
     /// The flattened, visible tree: root first, then depth-first.

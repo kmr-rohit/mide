@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::time::{Instant, SystemTime};
 
 use gpui::{
-    actions, div, fill, point, prelude::*, px, relative, size, App, Bounds, ClipboardItem, ContentMask,
+    rgba, actions, div, fill, point, prelude::*, px, relative, size, App, Bounds, ClipboardItem, ContentMask,
     Context, CursorStyle, ElementId, ElementInputHandler, Entity, EntityInputHandler, FocusHandle,
     Focusable, Font, FontFeatures, FontStyle, FontWeight, GlobalElementId, Hsla, InspectorElementId,
     IntoElement, LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point,
@@ -70,6 +70,8 @@ pub fn comment_token(syntax: &str) -> &'static str {
 }
 
 const TAB_SIZE: usize = 4;
+/// Width of the scrollbar thumb (and its grab zone).
+const SCROLLBAR_W: f32 = 10.0;
 const GUTTER_PAD_LEFT: f32 = 12.0;
 const GUTTER_PAD_RIGHT: f32 = 16.0;
 /// Lines kept visible above/below the caret when scrolling to reveal it.
@@ -213,6 +215,8 @@ pub struct EditorView {
     /// IME composition range (char offsets).
     marked: Option<Range<usize>>,
     selecting: bool,
+    /// Dragging the scrollbar thumb: where inside the thumb it was grabbed (px).
+    scroll_drag: Option<f32>,
     reveal_cursor: bool,
     find_bar: Option<Entity<FindBar>>,
     /// The last query, kept so ⌘G works after the bar is closed.
@@ -255,6 +259,7 @@ impl EditorView {
             layout: None,
             marked: None,
             selecting: false,
+            scroll_drag: None,
             reveal_cursor: false,
             find_bar: None,
             find_query: Query::default(),
@@ -694,8 +699,36 @@ impl EditorView {
         Some(self.buffer.offset_of(line, col))
     }
 
+    /// Vertical scrollbar: (track top in window px, track height, thumb offset in track, thumb height,
+    /// max scroll). `None` when the whole document fits or the editor has not been laid out yet.
+    fn scrollbar(&self) -> Option<(f32, f32, f32, f32, f32)> {
+        if !self.show_gutter {
+            return None;
+        }
+        let l = self.layout.as_ref()?;
+        let track = f32::from(l.bounds.size.height);
+        let max_y = self.buffer.len_lines().saturating_sub(1) as f32 * fonts::line_height();
+        if max_y <= 0.0 || track <= 0.0 {
+            return None;
+        }
+        let total = max_y + track;
+        let thumb = (track * track / total).max(28.0).min(track);
+        let at = (self.scroll_y / max_y).clamp(0.0, 1.0) * (track - thumb);
+        Some((f32::from(l.bounds.top()), track, at, thumb, max_y))
+    }
+
     fn on_mouse_down(&mut self, e: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         window.focus(&self.focus_handle);
+        if let (Some((top, _track, at, thumb, _)), Some(l)) = (self.scrollbar(), self.layout.as_ref()) {
+            if f32::from(e.position.x) >= f32::from(l.bounds.right()) - SCROLLBAR_W - 2.0 {
+                let y = f32::from(e.position.y) - top;
+                // Grab the thumb where it is; a click on the empty track centres it there.
+                let grab = if y >= at && y <= at + thumb { y - at } else { thumb / 2.0 };
+                self.scroll_drag = Some(grab);
+                self.drag_scroll_to(y, cx);
+                return;
+            }
+        }
         let Some(off) = self.offset_for_point(e.position) else { return };
         self.marked = None;
         self.selecting = true;
@@ -711,9 +744,25 @@ impl EditorView {
 
     fn on_mouse_up(&mut self, _: &MouseUpEvent, _: &mut Window, _: &mut Context<Self>) {
         self.selecting = false;
+        self.scroll_drag = None;
+    }
+
+    /// Scroll so the thumb's grab point sits at `y` (pixels below the track top).
+    fn drag_scroll_to(&mut self, y: f32, cx: &mut Context<Self>) {
+        let (Some(grab), Some((_, track, _, thumb, max_y))) = (self.scroll_drag, self.scrollbar()) else { return };
+        let room = (track - thumb).max(1.0);
+        self.scroll_y = ((y - grab) / room).clamp(0.0, 1.0) * max_y;
+        self.clamp_scroll();
+        cx.notify();
     }
 
     fn on_mouse_move(&mut self, e: &MouseMoveEvent, _: &mut Window, cx: &mut Context<Self>) {
+        if self.scroll_drag.is_some() {
+            if let Some((top, ..)) = self.scrollbar() {
+                self.drag_scroll_to(f32::from(e.position.y) - top, cx);
+            }
+            return;
+        }
         if !self.selecting {
             return;
         }
@@ -1065,10 +1114,22 @@ impl Render for EditorView {
             .child(EditorElement { editor: cx.entity() });
         // The find bar floats over the editor but is *not* inside its key context, so the
         // editor's shortcuts (arrows, Enter, ...) don't fire while typing in the bar.
+        let thumb = self.scrollbar().map(|(_, _, at, h, _)| {
+            let active = self.scroll_drag.is_some();
+            div()
+                .absolute()
+                .top(px(at))
+                .right(px(2.))
+                .w(px(if active { SCROLLBAR_W - 2.0 } else { 6.0 }))
+                .h(px(h))
+                .rounded(px(3.))
+                .bg(rgba(if active { 0x9a9a9a99 } else { 0x80808055 }))
+        });
         div()
             .size_full()
             .relative()
             .child(editor)
+            .children(thumb)
             .children(self.find_bar.clone().map(|bar| div().absolute().top(px(8.)).right(px(18.)).child(bar)))
     }
 }

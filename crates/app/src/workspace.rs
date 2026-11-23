@@ -1,7 +1,9 @@
 //! The window's root view: sidebar, tab bar, active editor, status bar.
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use std::sync::mpsc::Receiver;
 use std::sync::Arc;
 use std::time::Duration;
@@ -9,7 +11,7 @@ use std::time::Duration;
 use gpui::{
     WeakEntity, actions, div, prelude::*, px, rgb, svg, App, ClickEvent, Context, Entity, EntityId, FocusHandle,
     Focusable, FontWeight, IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
-    ClipboardItem, Pixels, Point, PathPromptOptions, Render, SharedString, Window, CursorStyle, rgba,
+    uniform_list, ClipboardItem, Pixels, ScrollStrategy, UniformListScrollHandle, Point, PathPromptOptions, Render, SharedString, Window, CursorStyle, rgba,
 };
 use mide_core::Buffer;
 use mide_fuzzy::Kind;
@@ -148,6 +150,8 @@ pub struct Workspace {
     message_gen: u64,
     pending_discard: Option<EntityId>,
     pending_quit: bool,
+    rows_cache: RefCell<(u64, Rc<Vec<mide_files::Row>>)>,
+    sidebar_scroll: UniformListScrollHandle,
     store: Option<Store>,
     ctx_menu: Option<CtxMenu>,
     pending_name: Option<NameAction>,
@@ -190,6 +194,8 @@ impl Workspace {
             message_gen: 0,
             pending_discard: None,
             pending_quit: false,
+            rows_cache: RefCell::new((0, Rc::new(Vec::new()))),
+            sidebar_scroll: UniformListScrollHandle::new(),
             store: Store::default_store(),
             ctx_menu: None,
             pending_name: None,
@@ -904,6 +910,9 @@ impl Workspace {
         self.tabs.push(editor);
         if let Some(t) = self.tree.as_mut() {
             let _ = t.reveal(&path);
+        }
+        if let Some(ix) = self.sidebar_rows().iter().position(|r| r.path == path) {
+            self.sidebar_scroll.scroll_to_item(ix, ScrollStrategy::Center);
         }
         self.activate(self.tabs.len() - 1, window, cx);
     }
@@ -1810,9 +1819,79 @@ impl Workspace {
 
     // ---- rendering -----------------------------------------------------------------------
 
+    /// The visible tree rows, recomputed only when the tree changed.
+    fn sidebar_rows(&self) -> Rc<Vec<mide_files::Row>> {
+        let Some(t) = self.tree.as_ref() else { return Rc::new(Vec::new()) };
+        let mut cache = self.rows_cache.borrow_mut();
+        if cache.0 != t.version() {
+            *cache = (t.version(), Rc::new(t.rows()));
+        }
+        cache.1.clone()
+    }
+
+    fn render_row(&self, i: usize, row: &mide_files::Row, active_path: Option<&Path>, cx: &mut Context<Self>) -> gpui::Stateful<gpui::Div> {
+        let selected = active_path == Some(row.path.as_path());
+        let icon = if row.is_dir {
+            if row.expanded { "icons/folder-open.svg" } else { "icons/folder.svg" }
+        } else {
+            file_icon(&row.name)
+        };
+        let arrow = if !row.is_dir {
+            None
+        } else if row.expanded {
+            Some("icons/chevron-down.svg")
+        } else {
+            Some("icons/chevron-right.svg")
+        };
+        let icon_color = if row.ignored { ui().icon_dim } else { ui().icon };
+        let (path, is_dir) = (row.path.clone(), row.is_dir);
+        let ctx_path = row.path.clone();
+        div()
+            .id(("row", i))
+            .h(px(ROW_HEIGHT))
+            .flex_none()
+            .flex()
+            .items_center()
+            .pl(px(6. + row.depth as f32 * 11.))
+            .pr(px(6.))
+            .when(selected, |d| d.bg(rgb(ui().sidebar_selected)))
+            .when(!selected, |d| d.hover(|h| h.bg(rgb(ui().sidebar_hover))))
+            .when(row.ignored, |d| d.text_color(rgb(ui().sidebar_dim)))
+            .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                this.click_row(path.clone(), is_dir, window, cx)
+            }))
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(move |this, e: &MouseDownEvent, _, cx| {
+                    this.ctx_menu = Some(CtxMenu { pos: e.position, path: ctx_path.clone(), is_dir, is_root: i == 0 });
+                    cx.notify();
+                }),
+            )
+            .child(div().w(px(12.)).h(px(12.)).flex_none().when_some(arrow, |d, a| {
+                d.child(svg().path(a).size(px(12.)).text_color(rgb(ui().icon)))
+            }))
+            .child(div().w(px(4.)).flex_none())
+            .child(svg().path(icon).size(px(16.)).flex_none().text_color(rgb(icon_color)))
+            .child(div().w(px(5.)).flex_none())
+            .child(div().overflow_hidden().whitespace_nowrap().child(row.name.clone()))
+    }
+
+    /// Thin scroll indicator for the sidebar list, from the list's own scroll state.
+    fn sidebar_thumb(&self) -> Option<gpui::Div> {
+        let st = self.sidebar_scroll.0.borrow();
+        let view = f32::from(st.base_handle.bounds().size.height);
+        let max = f32::from(st.base_handle.max_offset().height);
+        if max <= 0.5 || view <= 0.0 {
+            return None;
+        }
+        let off = (-f32::from(st.base_handle.offset().y)).clamp(0.0, max);
+        let thumb = (view * view / (view + max)).max(24.0).min(view);
+        let at = off / max * (view - thumb);
+        Some(div().absolute().top(px(at)).right(px(2.)).w(px(5.)).h(px(thumb)).rounded(px(3.)).bg(rgba(0x80808066)))
+    }
+
     fn render_sidebar(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let active_path = self.active_editor().and_then(|e| e.read(cx).path.clone());
-        let rows = self.tree.as_ref().map(|t| t.rows()).unwrap_or_default();
+        let rows = self.sidebar_rows();
         div()
             .w(px(self.layout.sidebar_width))
             .h_full()
@@ -1833,64 +1912,22 @@ impl Workspace {
                     .child("FOLDERS"),
             )
             .child(
-                div()
-                    .id("tree")
-                    .flex_1()
-                    .min_h_0()
-                    .overflow_y_scroll()
-                    .children(rows.into_iter().enumerate().map(|(i, row)| {
-                        let selected = active_path.as_deref() == Some(row.path.as_path());
-                        let icon = if row.is_dir {
-                            if row.expanded { "icons/folder-open.svg" } else { "icons/folder.svg" }
-                        } else {
-                            file_icon(&row.name)
-                        };
-                        let arrow = if !row.is_dir {
-                            None
-                        } else if row.expanded {
-                            Some("icons/chevron-down.svg")
-                        } else {
-                            Some("icons/chevron-right.svg")
-                        };
-                        let icon_color = if row.ignored { ui().icon_dim } else { ui().icon };
-                        let (path, is_dir) = (row.path.clone(), row.is_dir);
-                        let ctx_path = row.path.clone();
-                        div()
-                            .id(("row", i))
-                            .h(px(ROW_HEIGHT))
-                            .flex_none()
-                            .flex()
-                            .items_center()
-                            .pl(px(6. + row.depth as f32 * 11.))
-                            .pr(px(6.))
-                            .when(selected, |d| d.bg(rgb(ui().sidebar_selected)))
-                            .when(!selected, |d| d.hover(|h| h.bg(rgb(ui().sidebar_hover))))
-                            .when(row.ignored, |d| d.text_color(rgb(ui().sidebar_dim)))
-                            .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
-                                this.click_row(path.clone(), is_dir, window, cx)
-                            }))
-                            .on_mouse_down(
-                                MouseButton::Right,
-                                cx.listener(move |this, e: &MouseDownEvent, _, cx| {
-                                    this.ctx_menu = Some(CtxMenu {
-                                        pos: e.position,
-                                        path: ctx_path.clone(),
-                                        is_dir,
-                                        is_root: i == 0,
-                                    });
-                                    cx.notify();
-                                }),
-                            )
-                            .child(
-                                div().w(px(12.)).h(px(12.)).flex_none().when_some(arrow, |d, a| {
-                                    d.child(svg().path(a).size(px(12.)).text_color(rgb(ui().icon)))
-                                }),
-                            )
-                            .child(div().w(px(4.)).flex_none())
-                            .child(svg().path(icon).size(px(16.)).flex_none().text_color(rgb(icon_color)))
-                            .child(div().w(px(5.)).flex_none())
-                            .child(div().overflow_hidden().whitespace_nowrap().child(row.name.clone()))
-                    })),
+                div().flex_1().min_h_0().relative().child(
+                    uniform_list(
+                        "tree",
+                        rows.len(),
+                        cx.processor(move |this, range: std::ops::Range<usize>, _, cx| {
+                            let active = this.active_editor().and_then(|e| e.read(cx).path.clone());
+                            let rows = this.sidebar_rows();
+                            range
+                                .filter_map(|i| rows.get(i).map(|r| this.render_row(i, r, active.as_deref(), cx)))
+                                .collect::<Vec<_>>()
+                        }),
+                    )
+                    .track_scroll(self.sidebar_scroll.clone())
+                    .size_full(),
+                )
+                .children(self.sidebar_thumb()),
             )
     }
 

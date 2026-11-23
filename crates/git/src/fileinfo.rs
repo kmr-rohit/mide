@@ -120,7 +120,9 @@ pub struct BlameLine {
 
 /// `git blame` of the file on disk, one entry per line.
 pub fn blame(repo_dir: &Path, file: &Path) -> Result<Vec<BlameLine>, String> {
-    let out = Command::new("git")
+    let mut command = Command::new("git");
+    crate::ops::apply_env(&mut command, repo_dir);
+    let out = command
         .current_dir(repo_dir)
         .args(["blame", "--line-porcelain", "--"])
         .arg(file)
@@ -227,6 +229,34 @@ mod tests {
         assert_eq!(b.len(), 2);
         assert_eq!((b[0].author.as_str(), b[0].short_sha.as_str(), b[0].committed), ("Ada", "aaaaaaa", true));
         assert!(!b[1].committed);
+    }
+
+    #[test]
+    fn registered_environment_reaches_git() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        for a in [["init", "-q"].as_slice(), ["config", "commit.gpgsign", "false"].as_slice()] {
+            assert!(Command::new("git").current_dir(&root).args(a).status().unwrap().success());
+        }
+        std::fs::write(root.join("f"), "x").unwrap();
+        crate::ops::stage(&root, &["f".to_owned()]).unwrap();
+        // No identity configured anywhere except the profile environment.
+        crate::ops::set_env(
+            &root,
+            crate::ops::GitEnv {
+                set: vec![
+                    ("GIT_AUTHOR_NAME".into(), "Work Me".into()),
+                    ("GIT_AUTHOR_EMAIL".into(), "me@work.example".into()),
+                    ("GIT_COMMITTER_NAME".into(), "Work Me".into()),
+                    ("GIT_COMMITTER_EMAIL".into(), "me@work.example".into()),
+                    ("GIT_CONFIG_GLOBAL".into(), "/dev/null".into()),
+                ],
+                unset: vec![],
+            },
+        );
+        crate::ops::commit(&root, "as work", false).unwrap();
+        let log = Command::new("git").current_dir(&root).args(["log", "-1", "--format=%an <%ae>"]).output().unwrap();
+        assert_eq!(String::from_utf8_lossy(&log.stdout).trim(), "Work Me <me@work.example>");
     }
 
     #[test]

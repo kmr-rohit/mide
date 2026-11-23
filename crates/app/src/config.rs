@@ -44,12 +44,16 @@ struct WorkspaceSection {
     keep_open_on_switch: Option<bool>,
     /// Reopen last session's files (and recover unsaved text) when a folder opens.
     restore_session: Option<bool>,
+    /// Profile (see `[profile.NAME]`) to start with when nothing else picks one.
+    default_profile: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
 struct ProjectSection {
     open_terminals: Option<Vec<String>>,
+    /// Name of one of *your* profiles to use for this folder (it only names one, so it is safe).
+    profile: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -59,6 +63,8 @@ pub struct ConfigFile {
     workspace: WorkspaceSection,
     terminal: TerminalSection,
     project: ProjectSection,
+    /// `[profile.NAME]` tables: work/personal environments (see profile.rs).
+    profile: std::collections::BTreeMap<String, crate::profile::ProfileDef>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -74,6 +80,11 @@ pub struct Config {
     /// Reopen the files from last time and recover unsaved text (default: on).
     pub restore_session: bool,
     pub profiles: Vec<Profile>,
+    /// Work/personal profiles that switch git identity, kubeconfig and other environment.
+    pub env_profiles: Vec<crate::profile::ProfileDef>,
+    pub default_profile: Option<String>,
+    /// The folder's own request for one of the profiles above.
+    pub project_profile: Option<String>,
     /// Profile names to start when a project opens.
     pub open_terminals: Vec<String>,
 }
@@ -202,6 +213,9 @@ impl Config {
             keep_open_on_switch: false,
             restore_session: true,
             profiles,
+            env_profiles: Vec::new(),
+            default_profile: None,
+            project_profile: None,
             open_terminals: Vec::new(),
         }
     }
@@ -237,6 +251,19 @@ impl Config {
                 None => self.profiles.push(p),
             }
         }
+        if let Some(d) = file.workspace.default_profile.filter(|d| !d.trim().is_empty()) {
+            self.default_profile = Some(d);
+        }
+        if let Some(p) = file.project.profile.filter(|p| !p.trim().is_empty()) {
+            self.project_profile = Some(p);
+        }
+        for (name, mut def) in file.profile {
+            def.name = name;
+            match self.env_profiles.iter_mut().find(|q| q.name == def.name) {
+                Some(slot) => *slot = def,
+                None => self.env_profiles.push(def),
+            }
+        }
         if let Some(open) = file.project.open_terminals {
             self.open_terminals = open;
         }
@@ -261,8 +288,9 @@ impl ConfigFile {
     /// Drop everything that would run a program (profiles and auto-started sessions).
     /// Returns whether anything was dropped.
     fn strip_commands(&mut self) -> bool {
-        let had = !self.terminal.profile.is_empty() || self.project.open_terminals.as_ref().is_some_and(|o| !o.is_empty());
+        let had = !self.terminal.profile.is_empty() || !self.profile.is_empty() || self.project.open_terminals.as_ref().is_some_and(|o| !o.is_empty());
         self.terminal.profile.clear();
+        self.profile.clear();
         self.project.open_terminals = None;
         had
     }
@@ -328,7 +356,7 @@ pub fn find_on_path(program: &str) -> Option<PathBuf> {
 }
 
 /// Written when you choose "Edit Config" and the file doesn't exist yet.
-pub const TEMPLATE: &str = r#"# mide configuration. A project can override any of this in .mide/config.toml.
+pub const TEMPLATE: &str = r##"# mide configuration. A project can override any of this in .mide/config.toml.
 
 [editor]
 font_family = "Monaco"      # any installed monospace font, e.g. "Menlo", "SF Mono", "JetBrains Mono"
@@ -368,10 +396,33 @@ scrollback = 10000
 # name = "Vim"
 # command = "vim"
 
+# Work/personal profiles. Switching one (status bar, bottom right) changes who you commit as,
+# the SSH key git uses, KUBECONFIG and any variables below, in every terminal of the window.
+# Nothing global is changed. Uncomment and edit:
+#
+# [workspace]
+# default_profile = "personal"
+#
+# [profile.personal]
+# git_name = "Your Name"
+# git_email = "you@example.com"
+# git_ssh_key = "~/.ssh/id_ed25519_personal"
+# color = "#3b82f6"
+# folders = ["~/Personal"]
+#
+# [profile.work]
+# git_name = "Your Name"
+# git_email = "you@company.example"
+# kubeconfig = "~/.kube/config-work"
+# color = "#e5484d"
+# folders = ["~/work"]
+# env = { AWS_PROFILE = "work", OCI_CLI_PROFILE = "WORK" }
+
 [project]
+# profile = "work"        # use this one of your profiles for this folder
 # Sessions to start automatically when a folder opens (best set per project).
 # open_terminals = ["Shell", "Claude"]
-"#;
+"##;
 
 /// Quote one word for `sh`.
 pub fn shell_quote(s: &str) -> String {

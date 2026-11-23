@@ -36,7 +36,7 @@
   </div>
 </header>
 <main id="main">
-<div class="wrap page"><aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><ul><li><a href="#where-settings-live">Where settings live</a></li><li><a href="#config-toml">config.toml</a></li><li><a href="#keymap-toml">keymap.toml</a></li><li><a href="#layout-toml">layout.toml</a></li><li><a href="#themes">Themes</a></li><li><a href="#environment-variables">Environment variables</a></li></ul></aside><article class="prose"><h1>Configuration</h1>
+<div class="wrap page"><aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><ul><li><a href="#where-settings-live">Where settings live</a></li><li><a href="#config-toml">config.toml</a></li><li><a href="#work-and-personal-profiles">Work and personal profiles</a></li><li><a href="#keymap-toml">keymap.toml</a></li><li><a href="#layout-toml">layout.toml</a></li><li><a href="#themes">Themes</a></li><li><a href="#environment-variables">Environment variables</a></li></ul></aside><article class="prose"><h1>Configuration</h1>
 <p class="lead">Plain TOML files. Save one and mide reloads it.</p>
 
 <h2 id="where-settings-live">Where settings live</h2>
@@ -116,6 +116,33 @@ open_terminals = ["Shell", "Claude"]</code></pre>
 <tbody>
 <tr><td><code>open_terminals</code></td><td>Profile names to start when a folder opens. Only starts sessions if none are running, so switching folders never piles up duplicates.</td></tr>
 </tbody></table></div>
+
+<h2 id="work-and-personal-profiles">Work and personal profiles</h2>
+<p>A profile is a set of environment variables that mide applies to everything it runs: git commands, and every terminal session. It is meant for switching between, say, a personal GitHub account and a work one without editing global files. Define them in <code>~/.config/mide/config.toml</code>:</p>
+<pre><code>[workspace]
+default_profile = "personal"
+
+[profile.personal]
+git_name = "Your Name"
+git_email = "you@example.com"
+git_ssh_key = "~/.ssh/id_ed25519_personal"
+color = "#3b82f6"
+folders = ["~/Personal"]
+
+[profile.work]
+git_name = "Your Name"
+git_email = "you@company.example"
+kubeconfig = "~/.kube/config-work"
+color = "#e5484d"
+folders = ["~/work"]
+env = { AWS_PROFILE = "work", OCI_CLI_PROFILE = "WORK" }</code></pre>
+<p>Switch from the chip at the bottom right of the window, or with <strong>Profile: Switch…</strong> in the command palette. Opening a folder picks a profile by, in order: the folder's own <code>profile = "work"</code> under <code>[project]</code> in <code>.mide/config.toml</code>, the profile's <code>folders</code> list, the one you last chose for that folder, your <code>default_profile</code>, the one you used last. The git window shows who commits are made as.</p>
+<ul>
+<li><strong>Nothing global changes.</strong> mide does not run <code>git config --global</code>. Profiles are environment variables (<code>GIT_AUTHOR_*</code>, <code>GIT_COMMITTER_*</code>, <code>GIT_SSH_COMMAND</code>, <code>KUBECONFIG</code> and your own), so two windows can use different profiles at once.</li>
+<li><strong>Terminals follow.</strong> New sessions start with the profile. A shell sitting at its prompt is switched in place. A session that is running something (Claude, an editor, a build) cannot change its environment from outside, so it is marked ⚠ until you run <strong>Profile: Restart Stale Terminals</strong>.</li>
+<li><strong>Your rc files cannot undo it.</strong> In zsh the profile is applied after your <code>.zshrc</code>, so <code>export OCI_CLI_PROFILE=...</code> there does not win. Other shells get the variables at start-up only.</li>
+<li>A profile only sets what it lists, and unsets what other profiles set. A project's own <code>.mide/config.toml</code> may only <em>name</em> one of your profiles; profiles defined there are ignored until the folder is trusted.</li>
+</ul>
 
 <h2 id="keymap-toml">keymap.toml</h2>
 <p>Run <strong>Preferences: Edit Keybindings</strong> from the command palette to create <code>~/.config/mide/keymap.toml</code> with a list of actions. Saving it reloads the bindings. Your entries win over the defaults.</p>

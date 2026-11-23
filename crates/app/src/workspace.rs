@@ -31,6 +31,7 @@ use crate::theme::{self, ui};
 use crate::trust;
 use crate::palette::{Choice, Command, Item, Palette, PaletteEvent};
 use crate::terminal_view::{TerminalEvent, TerminalView};
+use crate::profile::{self, ProfileDef};
 use crate::recent;
 use crate::search_view::{SearchEvent, SearchView};
 
@@ -79,6 +80,12 @@ const MAX_QUICK_OPEN_FILES: usize = 50_000;
 
 struct Session {
     name: String,
+    /// The terminal profile it was started from (Shell, Claude, ...), to restart it.
+    spawned_from: String,
+    /// A plain shell (not a command like `claude`): it can be switched in place when idle.
+    plain: bool,
+    /// Still running with the environment of an earlier work/personal profile.
+    stale: bool,
     view: Entity<TerminalView>,
 }
 
@@ -147,6 +154,7 @@ struct DraggedTab {
 }
 
 enum PaletteKind {
+    EnvProfiles,
     Name { placeholder: String, initial: String },
     GotoLine,
     ConfirmSwitch { dirty: usize, name: String },
@@ -191,6 +199,11 @@ pub struct Workspace {
     rows_cache: RefCell<(u64, Rc<Vec<mide_files::Row>>)>,
     sidebar_scroll: UniformListScrollHandle,
     tabs_scroll: gpui::ScrollHandle,
+    /// Active work/personal profile (name) and where it came from.
+    active_profile: Option<String>,
+    profile_state: profile::State,
+    profile_file: PathBuf,
+    zsh_wrapper: Option<PathBuf>,
     store: Option<Store>,
     ctx_menu: Option<CtxMenu>,
     pending_name: Option<NameAction>,
@@ -236,6 +249,10 @@ impl Workspace {
             rows_cache: RefCell::new((0, Rc::new(Vec::new()))),
             sidebar_scroll: UniformListScrollHandle::new(),
             tabs_scroll: gpui::ScrollHandle::new(),
+            active_profile: None,
+            profile_state: profile::state_path().map(|p| profile::State::load_from(&p)).unwrap_or_default(),
+            profile_file: profile_file_path(),
+            zsh_wrapper: config_dir().and_then(|d| profile::install_zsh_wrapper(&d)),
             store: Store::default_store(),
             ctx_menu: None,
             pending_name: None,
@@ -370,6 +387,7 @@ impl Workspace {
         recent::save(&self.recent);
 
         self.load_config(cx);
+        self.choose_profile_for_folder(cx);
         // Start this project's configured sessions only if nothing is running yet,
         // so switching folders never piles up duplicate sessions.
         if self.terminals.is_empty() {
@@ -515,6 +533,166 @@ impl Workspace {
         }
     }
 
+    // ---- work / personal profiles ---------------------------------------------------------------
+
+    fn home_dir() -> PathBuf {
+        std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default()
+    }
+
+    fn active_def(&self) -> Option<&ProfileDef> {
+        let name = self.active_profile.as_deref()?;
+        self.config.env_profiles.iter().find(|p| p.name == name)
+    }
+
+    /// The environment git commands run in for the active profile.
+    fn git_env(&self) -> mide_git::ops::GitEnv {
+        let home = Self::home_dir();
+        let set = self.active_def().map(|d| d.env(&home)).unwrap_or_default();
+        let unset = profile::managed_keys(&self.config.env_profiles, &home)
+            .into_iter()
+            .filter(|k| !set.iter().any(|(s, _)| s == k))
+            .collect();
+        mide_git::ops::GitEnv { set, unset }
+    }
+
+    /// Write the file shells read, tell git, and tell the git window who commits now.
+    fn publish_profile(&mut self, cx: &mut Context<Self>) {
+        let home = Self::home_dir();
+        let script = profile::env_script(self.active_def(), &self.config.env_profiles, &home);
+        if let Some(dir) = self.profile_file.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let _ = std::fs::write(&self.profile_file, script);
+        if let Some(root) = &self.root {
+            mide_git::ops::set_env(root, self.git_env());
+        }
+        let identity = self.active_def().and_then(|d| d.identity());
+        if let Some(v) = &self.git_view {
+            v.update(cx, |v, cx| v.set_identity(identity, cx));
+        }
+    }
+
+    /// Environment and shell setup a new terminal session needs for the active profile.
+    fn profile_spawn_env(&self) -> Vec<(String, String)> {
+        let Some(def) = self.active_def() else { return Vec::new() };
+        let mut env = def.env(&Self::home_dir());
+        let shell = std::env::var("SHELL").unwrap_or_default();
+        if let (true, Some(wrapper)) = (shell.ends_with("/zsh"), &self.zsh_wrapper) {
+            // zsh reads its startup files from the wrapper, which applies the profile after your own.
+            env.push(("MIDE_USER_ZDOTDIR".into(), std::env::var("ZDOTDIR").unwrap_or_default()));
+            env.push(("ZDOTDIR".into(), wrapper.to_string_lossy().into_owned()));
+            env.push(("MIDE_PROFILE_FILE".into(), self.profile_file.to_string_lossy().into_owned()));
+        }
+        env
+    }
+
+    /// Is this session a shell sitting at its prompt (nothing running under it)?
+    fn shell_is_idle(session: &Session, cx: &App) -> bool {
+        if !session.plain || session.view.read(cx).exited.is_some() {
+            return false;
+        }
+        let pid = session.view.read(cx).pid();
+        std::process::Command::new("pgrep")
+            .args(["-P", &pid.to_string()])
+            .output()
+            .map(|o| o.status.code() == Some(1) && o.stdout.is_empty())
+            .unwrap_or(false)
+    }
+
+    /// Switch the window to profile `name` (or none). `quiet` skips the summary message.
+    fn apply_profile(&mut self, name: Option<String>, remember: bool, quiet: bool, cx: &mut Context<Self>) {
+        let name = name.filter(|n| self.config.env_profiles.iter().any(|p| &p.name == n));
+        let changed = self.active_profile != name;
+        self.active_profile = name.clone();
+        self.publish_profile(cx);
+        if remember {
+            if let Some(root) = self.root.clone() {
+                self.profile_state.remember(&root, name.as_deref());
+            }
+            if let Some(p) = profile::state_path() {
+                self.profile_state.save_to(&p);
+            }
+        }
+        if !changed {
+            cx.notify();
+            return;
+        }
+        // Running sessions: idle shells switch in place, anything busy is flagged.
+        let file = config::shell_quote(&self.profile_file.to_string_lossy());
+        let (mut switched, mut stale) = (0, 0);
+        for i in 0..self.terminals.len() {
+            if Self::shell_is_idle(&self.terminals[i], cx) {
+                let view = self.terminals[i].view.clone();
+                view.update(cx, |v, _| v.run_line(&format!("source {file}")));
+                self.terminals[i].stale = false;
+                switched += 1;
+            } else if self.terminals[i].view.read(cx).exited.is_none() {
+                self.terminals[i].stale = true;
+                stale += 1;
+            }
+        }
+        if !quiet {
+            let label = name.as_deref().unwrap_or("no profile");
+            let who = self.active_def().and_then(|d| d.identity()).map(|i| format!(", committing as {i}")).unwrap_or_default();
+            let mut msg = format!("Profile: {label}{who}");
+            if switched > 0 {
+                msg.push_str(&format!("; {switched} shell{} switched", plural(switched)));
+            }
+            if stale > 0 {
+                msg.push_str(&format!("; {stale} running session{} still use the old one (Profile: Restart Stale Terminals)", plural(stale)));
+            }
+            self.flash(msg, cx);
+        }
+        cx.notify();
+    }
+
+    /// Pick the profile for the folder that was just opened (project, folder rules, last used).
+    fn choose_profile_for_folder(&mut self, cx: &mut Context<Self>) {
+        let Some(root) = self.root.clone() else { return };
+        let chosen = profile::choose(
+            &self.config.env_profiles,
+            &root,
+            &Self::home_dir(),
+            self.config.project_profile.as_deref(),
+            self.config.default_profile.as_deref(),
+            &self.profile_state,
+        );
+        // Nothing decided: keep what this window already uses.
+        let target = chosen.or_else(|| self.active_profile.clone());
+        self.apply_profile(target, false, true, cx);
+        self.publish_profile(cx);
+    }
+
+    fn open_profile_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.config.env_profiles.is_empty() {
+            self.flash("No profiles yet: run “Profile: Edit Profiles” to add [profile.work] and [profile.personal]", cx);
+            return;
+        }
+        self.close_palette(false);
+        self.open_palette(PaletteKind::EnvProfiles, window, cx);
+    }
+
+    /// Restart sessions that still run with an old profile, keeping their terminal profile.
+    fn restart_stale(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let stale: Vec<(usize, String)> = self
+            .terminals
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| s.stale)
+            .map(|(i, s)| (i, s.spawned_from.clone()))
+            .collect();
+        if stale.is_empty() {
+            return self.flash("No terminal needs a restart", cx);
+        }
+        for (i, _) in stale.iter().rev() {
+            self.close_session(*i, true, window, cx);
+        }
+        for (_, from) in &stale {
+            self.spawn_terminal(from, window, cx);
+        }
+        self.flash(format!("Restarted {} session{}", stale.len(), plural(stale.len())), cx);
+    }
+
     // ---- files changed on disk, session restore, crash recovery -------------------------------
 
     /// An open file may have been changed by git, a formatter or an AI agent.
@@ -575,6 +753,30 @@ impl Workspace {
             .child("This file changed on disk, and you have unsaved edits.")
             .child(button("conflict-reload", "Reload from disk", true, cx))
             .child(button("conflict-keep", "Keep mine", false, cx))
+    }
+
+    /// The status bar chip showing (and switching) the active profile.
+    fn render_profile_chip(&self, cx: &mut Context<Self>) -> Option<gpui::Stateful<gpui::Div>> {
+        if self.config.env_profiles.is_empty() {
+            return None;
+        }
+        let def = self.active_def();
+        let color = def.and_then(|d| d.color_rgb()).unwrap_or(ui().status_text);
+        let label = def.map(|d| d.name.clone()).unwrap_or_else(|| "no profile".to_owned());
+        let stale = self.terminals.iter().filter(|s| s.stale).count();
+        Some(
+            div()
+                .id("profile-chip")
+                .flex()
+                .items_center()
+                .gap(px(5.))
+                .cursor_pointer()
+                .hover(|h| h.text_color(rgb(ui().status_hover_text)))
+                .on_click(cx.listener(|this, _: &ClickEvent, window, cx| this.open_profile_picker(window, cx)))
+                .child(div().w(px(8.)).h(px(8.)).rounded(px(4.)).bg(rgb(color)))
+                .child(label)
+                .when(stale > 0, |d| d.child(div().child(format!("⚠ {stale}")))),
+        )
     }
 
     fn session_state(&self, cx: &App) -> SessionState {
@@ -1417,6 +1619,8 @@ impl Workspace {
             }
         })
         .detach();
+        let identity = self.active_def().and_then(|d| d.identity());
+        v.update(cx, |v, cx| v.set_identity(identity, cx));
         self.git_view = Some(v.clone());
         Some(v)
     }
@@ -1521,6 +1725,10 @@ impl Workspace {
             self.flash(format!("Config error (using defaults for that file): {e}"), cx);
         }
         self.apply_fonts(cx);
+        if self.active_profile.is_some() || !self.config.env_profiles.is_empty() {
+            let keep = self.active_profile.clone();
+            self.apply_profile(keep, false, true, cx);
+        }
         if loaded.blocked_commands {
             self.flash(
                 "This folder's .mide/config.toml defines terminal commands. They are NOT run until you \
@@ -1646,7 +1854,8 @@ impl Workspace {
             name: profile_name.to_owned(),
             ..Default::default()
         });
-        let opts = config::spawn_options(&profile, &root, self.config.scrollback);
+        let mut opts = config::spawn_options(&profile, &root, self.config.scrollback);
+        opts.env.extend(self.profile_spawn_env());
         let view = match TerminalView::spawn(opts, cx) {
             Ok(v) => v,
             Err(e) => {
@@ -1672,7 +1881,13 @@ impl Workspace {
         })
         .detach();
         let handle = view.read(cx).focus_handle(cx);
-        self.terminals.push(Session { name, view });
+        self.terminals.push(Session {
+            name,
+            spawned_from: profile.name.clone(),
+            plain: profile.command.is_none(),
+            stale: false,
+            view,
+        });
         self.active_term = self.terminals.len() - 1;
         self.show_term = true;
         self.show_git = false;
@@ -1889,6 +2104,26 @@ impl Workspace {
         let goto = matches!(kind, PaletteKind::GotoLine);
         let (items, text_kind, placeholder) = match kind {
             PaletteKind::Name { .. } => (Vec::new(), Kind::Text, ""),
+            PaletteKind::EnvProfiles => {
+                let home = Self::home_dir();
+                let mut items: Vec<Item> = self
+                    .config
+                    .env_profiles
+                    .iter()
+                    .map(|p| Item {
+                        label: format!(
+                            "{}{}{}",
+                            if self.active_profile.as_deref() == Some(p.name.as_str()) { "● " } else { "" },
+                            p.name,
+                            p.identity().map(|i| format!(" — {i}")).unwrap_or_default()
+                        ),
+                        shortcut: p.kubeconfig.as_ref().map(|k| profile::expand(k, &home).rsplit('/').next().unwrap_or("").to_owned()).unwrap_or_default(),
+                        choice: Choice::EnvProfile(p.name.clone()),
+                    })
+                    .collect();
+                items.push(Item { label: "No profile".into(), shortcut: String::new(), choice: Choice::EnvProfile(String::new()) });
+                (items, Kind::Text, "Switch profile…")
+            }
             PaletteKind::GotoLine => (Vec::new(), Kind::Text, "Go to line (e.g. 120 or 120:8)"),
             PaletteKind::ConfirmSwitch { dirty, name } => {
                 let items = vec![
@@ -2060,6 +2295,9 @@ impl Workspace {
             cmd("Workspace: Trust This Folder", "", Command::TrustFolder),
             cmd("Preferences: Edit Global Config", "", Command::EditGlobalConfig),
             cmd("Preferences: Edit Project Config", "", Command::EditProjectConfig),
+            cmd("Profile: Switch…", "", Command::SwitchProfile),
+            cmd("Profile: Restart Stale Terminals", "", Command::RestartStale),
+            cmd("Profile: Edit Profiles", "", Command::EditGlobalConfig),
             cmd("Preferences: Edit Keybindings", "", Command::EditKeymap),
             cmd("Preferences: Reload Keymap", "", Command::ReloadKeymap),
             cmd("Preferences: Reload Config", "", Command::ReloadConfig),
@@ -2072,6 +2310,7 @@ impl Workspace {
         match choice {
             Choice::File(path) => self.open_file(&path, window, cx),
             Choice::Terminal(name) => self.spawn_terminal(&name, window, cx),
+            Choice::EnvProfile(name) => self.apply_profile((!name.is_empty()).then_some(name), true, false, cx),
             // Only used by prompts that own their palette (the git window).
             Choice::Index(0) => {
                 if let Some(path) = self.pending_open.take() {
@@ -2108,6 +2347,8 @@ impl Workspace {
                         ed.update(cx, |ed, cx| ed.goto_change(fwd, cx));
                     }
                 }
+                Command::SwitchProfile => self.open_profile_picker(window, cx),
+                Command::RestartStale => self.restart_stale(window, cx),
                 Command::EditKeymap => self.edit_keymap(window, cx),
                 Command::ReloadKeymap => self.reload_keymap(cx),
                 Command::NewWindow => {
@@ -2423,7 +2664,7 @@ impl Workspace {
                                 window.focus(&h);
                                 cx.notify();
                             }))
-                            .child(s.name.clone())
+                            .child(if s.stale { format!("⚠ {}", s.name) } else { s.name.clone() })
                             .when(!title.is_empty() && is_active, |d| {
                                 d.child(div().max_w(px(260.)).truncate().text_color(rgb(ui().strip_dim)).child(title))
                             })
@@ -2762,7 +3003,14 @@ impl Render for Workspace {
                             }))
                             .child(left),
                     )
-                    .child(right),
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(14.))
+                            .children(self.render_profile_chip(cx))
+                            .child(right),
+                    ),
             )
             .when(dragging_panel, |d| d.child(self.render_drop_zones(cx)))
             .children(self.render_ctx_menu(window.viewport_size(), cx))
@@ -2808,6 +3056,17 @@ impl Render for Workspace {
     }
 }
 
+fn config_dir() -> Option<PathBuf> {
+    std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config/mide"))
+}
+
+/// One env file per window, so windows can use different profiles.
+fn profile_file_path() -> PathBuf {
+    static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    config_dir().unwrap_or_default().join("run").join(format!("profile-{}-{n}.env", std::process::id()))
+}
+
 /// `file:///Users/me/My%20Project` -> `/Users/me/My Project`. Plain paths pass through.
 /// `42`, `42:7` or `42,7` -> (line, column), both 1-based; the column defaults to 1.
 fn parse_goto(text: &str) -> Option<(usize, usize)> {
@@ -2849,6 +3108,12 @@ fn plural(n: usize) -> &'static str {
         ""
     } else {
         "s"
+    }
+}
+
+impl Drop for Workspace {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.profile_file);
     }
 }
 

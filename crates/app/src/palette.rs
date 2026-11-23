@@ -23,6 +23,8 @@ pub enum Command {
     QuickOpen,
     GotoLine,
     NewFile,
+    SwitchProfile,
+    RestartStale,
     StageHunk,
     RevertHunk,
     NextChange,
@@ -64,6 +66,8 @@ pub enum Choice {
     Command(Command),
     /// Start a terminal session from the profile with this name.
     Terminal(String),
+    /// Switch to this work/personal profile (empty name: none).
+    EnvProfile(String),
     /// Generic: the n-th item of a caller-defined list (confirmations).
     Index(usize),
     /// Free text typed into an input prompt.

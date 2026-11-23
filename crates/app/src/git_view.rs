@@ -156,6 +156,8 @@ pub struct GitView {
     wrap: bool,
     /// Characters that fit in one half of the diff at the current window width.
     wrap_cols: usize,
+    /// Who commits are made as (the active profile), shown in the toolbar.
+    identity: Option<String>,
     collapsed: HashSet<&'static str>,
     commits_scroll: UniformListScrollHandle,
     detail_scroll: UniformListScrollHandle,
@@ -212,6 +214,7 @@ impl GitView {
             shown: Vec::new(),
             wrap: true,
             wrap_cols: 0,
+            identity: None,
             collapsed: ["TAGS", "STASHES", "SUBMODULES", "WORKTREES"].into_iter().collect(),
             commits_scroll: UniformListScrollHandle::new(),
             detail_scroll: UniformListScrollHandle::new(),
@@ -309,6 +312,13 @@ impl GitView {
         } else {
             self.detail.clone()
         };
+    }
+
+    pub fn set_identity(&mut self, identity: Option<String>, cx: &mut Context<Self>) {
+        if self.identity != identity {
+            self.identity = identity;
+            cx.notify();
+        }
     }
 
     fn toggle_wrap(&mut self, cx: &mut Context<Self>) {
@@ -719,6 +729,9 @@ impl GitView {
             .child(self.tool_button("tb-stash", "Stash", false, cx, |this, _, cx| this.do_stash(cx)))
             .child(self.tool_button("tb-pop", "Pop Stash", false, cx, |this, _, cx| this.do_stash_pop(cx)))
             .child(div().flex_1())
+            .children(self.identity.clone().map(|i| {
+                div().text_size(px(11.)).text_color(rgb(ui().muted)).child(format!("Committing as {i}"))
+            }))
             .child(self.tool_button("tb-wrap", if self.wrap { "Wrap: on" } else { "Wrap: off" }, false, cx, |this, _, cx| this.toggle_wrap(cx)))
             .when_some(self.busy.clone(), |d, label| {
                 d.child(div().text_size(px(12.)).italic().text_color(rgb(ui().muted)).child(format!("{label}…")))

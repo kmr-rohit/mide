@@ -128,6 +128,16 @@ impl TerminalView {
         }
     }
 
+    /// Type `line` at the prompt and press Enter, first clearing anything half-typed (Ctrl-U).
+    pub fn run_line(&mut self, line: &str) {
+        self.term.write(format!("\x15{line}\r"));
+    }
+
+    /// Process id of the program the session started (the shell, or the command).
+    pub fn pid(&self) -> u32 {
+        self.term.pid()
+    }
+
     pub fn paste_text(&mut self, text: &str) {
         self.term.scroll_to_bottom();
         self.term.paste(text);

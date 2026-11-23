@@ -15,8 +15,44 @@ pub type OpResult = Result<String, String>;
 
 const TIMEOUT: Duration = Duration::from_secs(180);
 
+/// Environment git commands run in for a repository: who you commit as, which SSH key to use.
+/// It comes from the active work/personal profile and is set per folder, so two windows on
+/// different folders can use different profiles.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GitEnv {
+    pub set: Vec<(String, String)>,
+    /// Variables to remove (set by the previous profile or the parent process).
+    pub unset: Vec<String>,
+}
+
+static ENVS: std::sync::Mutex<Vec<(std::path::PathBuf, GitEnv)>> = std::sync::Mutex::new(Vec::new());
+
+/// Use `env` for every git command run in `root` (or below it).
+pub fn set_env(root: &Path, env: GitEnv) {
+    if let Ok(mut all) = ENVS.lock() {
+        all.retain(|(r, _)| r != root);
+        all.push((root.to_owned(), env));
+    }
+}
+
+/// Add the registered environment for `dir` to `cmd`. The most specific folder wins.
+pub fn apply_env(cmd: &mut Command, dir: &Path) {
+    let Ok(all) = ENVS.lock() else { return };
+    let best = all.iter().filter(|(r, _)| dir.starts_with(r)).max_by_key(|(r, _)| r.components().count());
+    if let Some((_, env)) = best {
+        for k in &env.unset {
+            cmd.env_remove(k);
+        }
+        for (k, v) in &env.set {
+            cmd.env(k, v);
+        }
+    }
+}
+
 fn run(root: &Path, args: &[&str], stdin: Option<&str>) -> OpResult {
-    let mut child = Command::new("git")
+    let mut command = Command::new("git");
+    apply_env(&mut command, root);
+    let mut child = command
         .current_dir(root)
         .args(args)
         // Never wait for a password/editor that has no terminal to appear on.

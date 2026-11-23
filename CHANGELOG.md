@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+* **Work/personal profiles.** Define `[profile.work]`, `[profile.personal]` in `config.toml` and switch from the status bar (or Profile: Switch…). A profile sets the git identity and SSH key, `KUBECONFIG` and any environment variables, for every git action in the window and every terminal. Nothing global (`git config --global`) is changed, so other windows and apps are unaffected. Folder rules select a profile automatically; the choice is remembered per folder.
+* Running terminals follow the switch: idle shells are switched in place, busy ones (Claude, vim, builds) are flagged ⚠ until you run Profile: Restart Stale Terminals. zsh sessions apply the profile after your `.zshrc`, so an `export` in your rc file cannot undo it.
+* The git window shows who you are committing as.
+
 ## 0.2.0 (2026-11-23)
 
 Data safety (the P0 items from the product review):

@@ -9,6 +9,7 @@ mod keys;
 mod keymap;
 mod layout;
 mod palette;
+mod profile;
 mod perf;
 mod recent;
 mod search_view;

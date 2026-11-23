@@ -28,6 +28,23 @@ use git_view::*;
 use palette::*;
 use workspace::*;
 
+/// Create the editor window. Returns `None` if the system refuses.
+fn open_main_window(cx: &mut App, root: Option<PathBuf>, initial: Option<PathBuf>) -> Option<gpui::WindowHandle<Workspace>> {
+    let bounds = Bounds::centered(None, size(px(1200.), px(780.)), cx);
+    cx.open_window(
+        WindowOptions {
+            window_bounds: Some(WindowBounds::Windowed(bounds)),
+            titlebar: Some(TitlebarOptions { title: Some("mide".into()), ..Default::default() }),
+            ..Default::default()
+        },
+        move |window, cx| {
+            perf::mark("window created");
+            cx.new(|cx| Workspace::new(root.clone(), initial.clone(), window, cx))
+        },
+    )
+    .ok()
+}
+
 fn main() {
     perf::init();
 
@@ -51,26 +68,35 @@ fn main() {
         let _ = url_tx.try_send(urls);
     });
 
+    // Clicking the Dock icon after the window was closed brings a window back, on the
+    // most recent project (its tabs return through session restore).
+    app.on_reopen(|cx| {
+        if cx.windows().is_empty() {
+            let last = recent::load().into_iter().next();
+            open_main_window(cx, last, None);
+        }
+        cx.activate(true);
+    });
+
     app.run(move |cx: &mut App| {
         bind_keys(cx);
         set_menus(cx);
-        let bounds = Bounds::centered(None, size(px(1200.), px(780.)), cx);
-        let window = cx
-            .open_window(
-                WindowOptions {
-                    window_bounds: Some(WindowBounds::Windowed(bounds)),
-                    titlebar: Some(TitlebarOptions { title: Some("mide".into()), ..Default::default() }),
-                    ..Default::default()
-                },
-                move |window, cx| {
-                    perf::mark("window created");
-                    cx.new(|cx| Workspace::new(root.clone(), initial.clone(), window, cx))
-                },
-            )
-            .expect("open window");
+        open_main_window(cx, root.clone(), initial.clone());
+        // Paths from Finder / `mide <path>`. The window may have been closed (the app keeps
+        // running, like any Mac app), so find it again or open a fresh one each time.
         cx.spawn(async move |cx| {
             while let Ok(urls) = url_rx.recv().await {
-                let _ = window.update(cx, |ws, window, cx| ws.open_urls(urls, window, cx));
+                let _ = cx.update(|cx| {
+                    let handle = cx
+                        .windows()
+                        .into_iter()
+                        .find_map(|w| w.downcast::<Workspace>())
+                        .or_else(|| open_main_window(cx, None, None));
+                    if let Some(h) = handle {
+                        let _ = h.update(cx, |ws, window, cx| ws.open_urls(urls, window, cx));
+                        let _ = h.update(cx, |_, window, _| window.activate_window());
+                    }
+                });
             }
         })
         .detach();

@@ -6,6 +6,7 @@ mod fonts;
 mod git_view;
 mod input;
 mod keys;
+mod keymap;
 mod layout;
 mod palette;
 mod perf;
@@ -81,6 +82,7 @@ fn main() {
 
     app.run(move |cx: &mut App| {
         bind_keys(cx);
+        keymap::apply_user_keymap(cx);
         cx.on_action(|_: &NewWindow, cx| {
             open_main_window(cx, None, None);
         });
@@ -109,7 +111,7 @@ fn main() {
 }
 
 /// The macOS menu bar. Shortcuts shown here come from the key bindings.
-fn set_menus(cx: &mut App) {
+pub(crate) fn set_menus(cx: &mut App) {
     cx.set_menus(vec![
         Menu {
             name: "mide".into(),
@@ -180,7 +182,7 @@ fn set_menus(cx: &mut App) {
     ]);
 }
 
-fn bind_keys(cx: &mut App) {
+pub(crate) fn bind_keys(cx: &mut App) {
     let ed = Some("Editor");
     cx.bind_keys([
         KeyBinding::new("left", MoveLeft, ed),

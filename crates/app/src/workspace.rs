@@ -246,6 +246,9 @@ impl Workspace {
         perf::mark("workspace: struct built (syntaxes, layout, recents)");
         theme::set(ws.layout.theme);
         window.focus(&ws.focus_handle);
+        if let Some(e) = crate::keymap::take_errors().into_iter().next() {
+            ws.flash(e, cx);
+        }
         ws.load_config(cx);
         perf::mark("workspace: config + fonts loaded");
         if let Some(root) = root {
@@ -1302,10 +1305,14 @@ impl Workspace {
         match result {
             Ok(name) => {
                 self.flash(format!("Saved {name}"), cx);
+                let saved_path_is_keymap = saved_path.is_some() && saved_path == crate::keymap::path();
                 let is_config = saved_path.is_some_and(|p| {
                     Some(&p) == config::global_path().as_ref()
                         || self.root.as_ref().is_some_and(|r| p == config::project_path(r))
                 });
+                if saved_path_is_keymap {
+                    self.reload_keymap(cx);
+                }
                 if is_config {
                     self.load_config(cx);
                     if self.message.as_deref().is_none_or(|m| !m.starts_with("Config error")) {
@@ -1511,6 +1518,32 @@ impl Workspace {
         }
         if changed {
             cx.refresh_windows();
+        }
+    }
+
+    /// Open `~/.config/mide/keymap.toml`, creating it from the template first.
+    fn edit_keymap(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(path) = crate::keymap::path() else { return };
+        if !path.exists() {
+            if let Some(dir) = path.parent() {
+                let _ = std::fs::create_dir_all(dir);
+            }
+            if let Err(e) = std::fs::write(&path, crate::keymap::TEMPLATE) {
+                return self.flash(format!("Cannot create {}: {e}", path.display()), cx);
+            }
+        }
+        self.open_file(&path, window, cx);
+    }
+
+    /// Re-read the key bindings from disk without restarting.
+    fn reload_keymap(&mut self, cx: &mut Context<Self>) {
+        cx.clear_key_bindings();
+        crate::bind_keys(cx);
+        crate::keymap::apply_user_keymap(cx);
+        crate::set_menus(cx);
+        match crate::keymap::take_errors().into_iter().next() {
+            Some(e) => self.flash(e, cx),
+            None => self.flash("Keymap reloaded", cx),
         }
     }
 
@@ -1963,6 +1996,8 @@ impl Workspace {
             cmd("Workspace: Trust This Folder", "", Command::TrustFolder),
             cmd("Preferences: Edit Global Config", "", Command::EditGlobalConfig),
             cmd("Preferences: Edit Project Config", "", Command::EditProjectConfig),
+            cmd("Preferences: Edit Keybindings", "", Command::EditKeymap),
+            cmd("Preferences: Reload Keymap", "", Command::ReloadKeymap),
             cmd("Preferences: Reload Config", "", Command::ReloadConfig),
             cmd("Quit", "⌘Q", Command::Quit),
         ]);
@@ -2001,6 +2036,8 @@ impl Workspace {
                 Command::GotoLine if self.active_editor().is_some() => self.open_palette(PaletteKind::GotoLine, window, cx),
                 Command::GotoLine => {}
                 Command::FindInFiles => self.find_in_files(&FindInFiles, window, cx),
+                Command::EditKeymap => self.edit_keymap(window, cx),
+                Command::ReloadKeymap => self.reload_keymap(cx),
                 Command::NewWindow => {
                     crate::open_main_window(cx, None, None);
                 }

@@ -23,6 +23,8 @@ pub enum Command {
     QuickOpen,
     GotoLine,
     NewFile,
+    EditKeymap,
+    ReloadKeymap,
     NewWindow,
     OpenFolderInNewWindow,
     SendSelection,

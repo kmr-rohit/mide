@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 (2026-11-23)
 
 Data safety (the P0 items from the product review):
 

@@ -40,7 +40,7 @@ Measured on one Apple Silicon Mac with a release build. Every number is reproduc
 On Apple Silicon or Intel, from a terminal:
 
 ```sh
-curl -fsSL -o /tmp/mide.pkg https://github.com/kmr-rohit/mide/releases/latest/download/mide-0.1.0-universal.pkg && sudo installer -pkg /tmp/mide.pkg -target /
+curl -fsSL -o /tmp/mide.pkg https://github.com/kmr-rohit/mide/releases/latest/download/mide-0.2.0-universal.pkg && sudo installer -pkg /tmp/mide.pkg -target /
 mide ~/code/my-project
 ```
 

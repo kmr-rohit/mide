@@ -48,28 +48,28 @@
 
 <h2 id="install-from-the-terminal">Install from the terminal</h2>
 <p>The quickest way, on Apple Silicon or Intel. It downloads the universal package and installs it; macOS does not show the unverified-developer warning for packages installed this way.</p>
-<pre><code>curl -fsSL -o /tmp/mide.pkg https://github.com/kmr-rohit/mide/releases/latest/download/mide-0.1.0-universal.pkg && sudo installer -pkg /tmp/mide.pkg -target /</code></pre>
+<pre><code>curl -fsSL -o /tmp/mide.pkg https://github.com/kmr-rohit/mide/releases/latest/download/mide-0.2.0-universal.pkg && sudo installer -pkg /tmp/mide.pkg -target /</code></pre>
 <p>Then run <code>mide .</code> in a project folder.</p>
 
 <h2 id="install-with-the-package">Install with the package</h2>
 <ol>
-  <li>Download <code>mide-0.1.0-arm64.pkg</code> (or the <code>universal</code> one) from the <a href="https://github.com/kmr-rohit/mide/releases/latest">latest release</a>.</li>
+  <li>Download <code>mide-0.2.0-arm64.pkg</code> (or the <code>universal</code> one) from the <a href="https://github.com/kmr-rohit/mide/releases/latest">latest release</a>.</li>
   <li>Open it and follow the installer. It puts <strong>mide.app</strong> in <code>/Applications</code> and adds a <code>mide</code> command to <code>/usr/local/bin</code>.</li>
   <li>Open mide from Applications, or run <code>mide .</code> in a project folder.</li>
 </ol>
 <p>To check the download, compare its checksum with the <code>.sha256</code> file on the release page:</p>
-<pre><code>shasum -a 256 -c mide-0.1.0-arm64.pkg.sha256</code></pre>
+<pre><code>shasum -a 256 -c mide-0.2.0-arm64.pkg.sha256</code></pre>
 <p>Prefer the command line? This installs without the window:</p>
-<pre><code>sudo installer -pkg mide-0.1.0-arm64.pkg -target /</code></pre>
+<pre><code>sudo installer -pkg mide-0.2.0-arm64.pkg -target /</code></pre>
 
 <h3>If macOS says it cannot be opened</h3>
 <div class="callout">
   <p>mide is not yet notarized by Apple, so Gatekeeper shows an "unidentified developer" warning the first time. This is expected for an independent open-source app, and it is safe to continue if you downloaded the installer from this project's release page.</p>
 </div>
-<p>If you see <strong>"mide-0.1.0-arm64.pkg" Not Opened</strong> with only <strong>Move to Trash</strong> and <strong>Done</strong>, choose <strong>Done</strong>, then either:</p>
+<p>If you see <strong>"mide-0.2.0-arm64.pkg" Not Opened</strong> with only <strong>Move to Trash</strong> and <strong>Done</strong>, choose <strong>Done</strong>, then either:</p>
 <ul>
   <li>open <strong>System Settings, Privacy &amp; Security</strong>, scroll down to the message about the package and choose <strong>Open Anyway</strong>, then confirm; or</li>
-  <li>remove the download flag from the terminal and open it again: <code>xattr -d com.apple.quarantine ~/Downloads/mide-0.1.0-arm64.pkg</code></li>
+  <li>remove the download flag from the terminal and open it again: <code>xattr -d com.apple.quarantine ~/Downloads/mide-0.2.0-arm64.pkg</code></li>
 </ul>
 <p>On macOS 15 (Sequoia) and later, Control-click and <strong>Open</strong> no longer skips this check; use one of the steps above, or the <a href="#install-from-the-terminal">terminal install</a>.</p>
 
@@ -90,7 +90,7 @@ cd mide
 cargo run --release -p mide -- .</code></pre>
 <p>Build the app bundle or the installer yourself:</p>
 <pre><code>scripts/bundle.sh --install    # build mide.app and copy it to /Applications
-scripts/pkg.sh                 # build dist/mide-0.1.0-arm64.pkg
+scripts/pkg.sh                 # build dist/mide-0.2.0-arm64.pkg
 scripts/pkg.sh --universal     # Apple Silicon and Intel in one package</code></pre>
 
 <h2 id="update">Update</h2>

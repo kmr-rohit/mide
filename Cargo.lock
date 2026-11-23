@@ -3330,7 +3330,7 @@ dependencies = [
 
 [[package]]
 name = "mide"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "async-channel 2.5.0",
@@ -3348,7 +3348,7 @@ dependencies = [
 
 [[package]]
 name = "mide-bench"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "alacritty_terminal",
  "mide-core",
@@ -3361,7 +3361,7 @@ dependencies = [
 
 [[package]]
 name = "mide-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "regex",
  "ropey",
@@ -3370,7 +3370,7 @@ dependencies = [
 
 [[package]]
 name = "mide-files"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ignore",
  "mide-core",
@@ -3380,14 +3380,14 @@ dependencies = [
 
 [[package]]
 name = "mide-fuzzy"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "nucleo-matcher",
 ]
 
 [[package]]
 name = "mide-git"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "git2",
  "similar",
@@ -3396,7 +3396,7 @@ dependencies = [
 
 [[package]]
 name = "mide-syntax"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -3406,7 +3406,7 @@ dependencies = [
 
 [[package]]
 name = "mide-term"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "alacritty_terminal",
 ]

@@ -29,6 +29,11 @@ Windows, menus and git in the editor:
 * Git diff view wraps long lines onto extra rows (toolbar toggle "Wrap: on/off"), following the window and column widths.
 * Git gutter markers (green added, blue modified, red deleted lines versus the staged file), Stage Hunk, Revert Hunk, Next/Previous Change (⌥⌘↓/↑), and the blame of the caret line in the status bar.
 
+Fixed:
+
+* Right-click menu entries did nothing: the press that clicked an entry also dismissed the menu first.
+* Closing the last window left a Dock icon that could not bring the app back; the Dock icon, `mide <path>` and Finder now open a window again.
+
 ## 0.1.0
 
 First public release.

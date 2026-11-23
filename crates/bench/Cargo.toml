@@ -1,14 +1,14 @@
 [package]
 name = "mide-bench"
-version = "0.2.0"
+version = "0.3.0"
 edition.workspace = true
 license.workspace = true
 
 [dependencies]
 alacritty_terminal = "0.26.0"
-mide-core = { version = "0.2.0", path = "../core" }
-mide-files = { version = "0.2.0", path = "../files" }
-mide-fuzzy = { version = "0.2.0", path = "../fuzzy" }
-mide-git = { version = "0.2.0", path = "../git" }
-mide-syntax = { version = "0.2.0", path = "../syntax" }
-mide-term = { version = "0.2.0", path = "../term" }
+mide-core = { version = "0.3.0", path = "../core" }
+mide-files = { version = "0.3.0", path = "../files" }
+mide-fuzzy = { version = "0.3.0", path = "../fuzzy" }
+mide-git = { version = "0.3.0", path = "../git" }
+mide-syntax = { version = "0.3.0", path = "../syntax" }
+mide-term = { version = "0.3.0", path = "../term" }

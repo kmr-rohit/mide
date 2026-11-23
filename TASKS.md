@@ -64,7 +64,7 @@ Announce
 
 ## Housekeeping
 
-- [ ] Release 0.3.0 once notarization works: bump the version, tag it, check the DMG, cask and install script against the real release page.
+- [~] Release 0.3.0 (unsigned): version bumped and tagged; check the DMG, the cask and the install script against the real release page. A signed and notarized release follows once the Apple secrets exist.
 - [ ] Run the Find bar changes through a manual pass on a real file with the bar open and a big file open
       (done once for the happy path; edit-while-searching on a 1M-line file not yet tried).
 - [ ] Add the new "match at the end" benchmarks to `docs/notes/PERFORMANCE.md` if it lists benchmarks by name.

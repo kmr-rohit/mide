@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+* **Language servers.** mide now starts the language server installed for the file you open (rust-analyzer, typescript-language-server, pyright, gopls, clangd, zls, sourcekit-lsp, bash-language-server) and shows its errors and warnings as wavy underlines, with counts and the message under the caret in the status bar. **F12** goes to a definition, **F8** / **⇧F8** step through the problems. If no server is installed, mide shows the install command. Turn it off with `language_servers = false` under `[workspace]`. Completion and hover are not built yet.
+* **⌘-click goes to the definition** in files with a language server (in other files it still adds a cursor); **⌥-click** always adds a cursor. The problem count in the status bar is its own button that jumps to the next problem, instead of opening the git window.
+* The README and website now have screenshots of the editor, language servers, git and the terminal.
+* The Find bar's fields support select all, copy, cut and shift-arrow selection, and a chevron shows or hides the Replace row.
+* New one-line installer (`scripts/install.sh`).
+* Each release now also ships a drag-to-Applications disk image and a Homebrew cask file (`scripts/dmg.sh`, `scripts/cask.sh`).
+* The README compares mide with Zed, Sublime Text and VS Code, including what it does not have yet; the roadmap page is brought up to date.
 * **Find is about 200x faster on big files.** On a 1,000,000-line (35 MB) file, Find next to a match at the very end went from 269 ms to under 1 ms, and typing in the Find bar from 537 ms to 1.6 ms per keystroke. Search now scans large blocks in one pass across all cores. Files over 4 million characters are searched off the UI thread, so typing never waits on it. Select All Occurrences is 7x faster.
 * **Work/personal profiles.** Define `[profile.work]`, `[profile.personal]` in `config.toml` and switch from the status bar (or Profile: Switch…). A profile sets the git identity and SSH key, `KUBECONFIG` and any environment variables, for every git action in the window and every terminal. Nothing global (`git config --global`) is changed, so other windows and apps are unaffected. Folder rules select a profile automatically; the choice is remembered per folder.
 * Running terminals follow the switch: idle shells are switched in place, busy ones (Claude, vim, builds) are flagged ⚠ until you run Profile: Restart Stale Terminals. zsh sessions apply the profile after your `.zshrc`, so an `export` in your rc file cannot undo it.

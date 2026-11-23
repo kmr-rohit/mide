@@ -7,6 +7,7 @@ mod git_view;
 mod input;
 mod keys;
 mod keymap;
+mod lsp;
 mod layout;
 mod palette;
 mod profile;
@@ -247,6 +248,9 @@ pub(crate) fn bind_keys(cx: &mut App) {
         KeyBinding::new("cmd-s", Save, None),
         KeyBinding::new("cmd-alt-down", NextChange, ed),
         KeyBinding::new("cmd-alt-up", PrevChange, ed),
+        KeyBinding::new("f12", GoToDefinition, None),
+        KeyBinding::new("f8", NextProblem, None),
+        KeyBinding::new("shift-f8", PrevProblem, None),
         KeyBinding::new("cmd-shift-n", NewWindow, None),
         KeyBinding::new("cmd-alt-o", OpenFolderInNewWindow, None),
         KeyBinding::new("cmd-shift-f", FindInFiles, None),

@@ -44,6 +44,8 @@ struct WorkspaceSection {
     keep_open_on_switch: Option<bool>,
     /// Reopen last session's files (and recover unsaved text) when a folder opens.
     restore_session: Option<bool>,
+    /// Run language servers (diagnostics, go to definition) for the languages that have one installed.
+    language_servers: Option<bool>,
     /// Profile (see `[profile.NAME]`) to start with when nothing else picks one.
     default_profile: Option<String>,
 }
@@ -79,6 +81,8 @@ pub struct Config {
     pub keep_open_on_switch: bool,
     /// Reopen the files from last time and recover unsaved text (default: on).
     pub restore_session: bool,
+    /// Start language servers found on this Mac (rust-analyzer, gopls, ...). Default: on.
+    pub language_servers: bool,
     pub profiles: Vec<Profile>,
     /// Work/personal profiles that switch git identity, kubeconfig and other environment.
     pub env_profiles: Vec<crate::profile::ProfileDef>,
@@ -212,6 +216,7 @@ impl Config {
             terminal_font_size: None,
             keep_open_on_switch: false,
             restore_session: true,
+            language_servers: true,
             profiles,
             env_profiles: Vec::new(),
             default_profile: None,
@@ -244,6 +249,9 @@ impl Config {
         }
         if let Some(restore) = file.workspace.restore_session {
             self.restore_session = restore;
+        }
+        if let Some(on) = file.workspace.language_servers {
+            self.language_servers = on;
         }
         for p in file.terminal.profile.into_iter().filter(|p| !p.name.trim().is_empty()) {
             match self.profiles.iter_mut().find(|q| q.name == p.name) {
@@ -368,6 +376,9 @@ font_size = 12
 keep_open_on_switch = false
 # true: reopen last time's files and caret positions, and recover unsaved text after a crash.
 restore_session = true
+# true: start the language server of the file's language when one is installed (rust-analyzer,
+# gopls, clangd, typescript-language-server, pyright, ...) for errors and Go to Definition.
+language_servers = true
 
 [terminal]
 scrollback = 10000

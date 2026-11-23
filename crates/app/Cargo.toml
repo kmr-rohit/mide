@@ -13,6 +13,7 @@ mide-core = { version = "0.2.0", path = "../core" }
 mide-files = { version = "0.2.0", path = "../files" }
 mide-fuzzy = { version = "0.2.0", path = "../fuzzy" }
 mide-git = { version = "0.2.0", path = "../git" }
+mide-lsp = { version = "0.2.0", path = "../lsp" }
 mide-syntax = { version = "0.2.0", path = "../syntax" }
 mide-term = { version = "0.2.0", path = "../term" }
 serde = { version = "1.0.229", features = ["derive"] }

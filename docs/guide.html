@@ -36,7 +36,7 @@
   </div>
 </header>
 <main id="main">
-<div class="wrap page"><aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><ul><li><a href="#open-a-project">Open a project</a></li><li><a href="#go-to-anything">Go to anything</a></li><li><a href="#windows-menus-and-git-in-the-editor">Windows, menus and git in the editor</a></li><li><a href="#files-and-tabs">Files and tabs</a></li><li><a href="#editing">Editing</a></li><li><a href="#selection-and-multiple-cursors">Selection and multiple cursors</a></li><li><a href="#find-and-replace">Find and replace</a></li><li><a href="#panels-and-views">Panels and views</a></li><li><a href="#themes">Themes</a></li></ul></aside><article class="prose"><h1>Guide</h1>
+<div class="wrap page"><aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><ul><li><a href="#open-a-project">Open a project</a></li><li><a href="#go-to-anything">Go to anything</a></li><li><a href="#windows-menus-and-git-in-the-editor">Windows, menus and git in the editor</a></li><li><a href="#files-and-tabs">Files and tabs</a></li><li><a href="#editing">Editing</a></li><li><a href="#selection-and-multiple-cursors">Selection and multiple cursors</a></li><li><a href="#find-and-replace">Find and replace</a></li><li><a href="#language-servers">Language servers</a></li><li><a href="#panels-and-views">Panels and views</a></li><li><a href="#themes">Themes</a></li></ul></aside><article class="prose"><h1>Guide</h1>
 <p class="lead">Everything you need to work in mide, and every shortcut.</p>
 
 <h2 id="open-a-project">Open a project</h2>
@@ -44,6 +44,7 @@
 <p>Opening a different folder replaces the whole workspace: its files and terminal sessions close, and if a file has unsaved changes you are asked first. To keep your files and terminals instead, set <code>keep_open_on_switch = true</code> in the <a href="configuration.html">configuration</a>.</p>
 
 <h2 id="go-to-anything">Go to anything</h2>
+<figure class="shot"><img src="assets/shot-palette.png" width="1800" height="1131" alt="The command palette open over the editor, listing the language commands Next Problem (F8), Go to Definition (F12) and Previous Problem (Shift F8)." loading="lazy"><figcaption>The command palette lists every command with its shortcut. Here, the language server commands.</figcaption></figure>
 <div class="table-wrap"><table>
 <thead><tr><th scope="col">Shortcut</th><th scope="col">What it does</th></tr></thead>
 <tbody>
@@ -98,11 +99,13 @@
 <tr><td class="keys"><kbd>⌘</kbd><kbd>L</kbd></td><td>Select the line; press again to take the next line too.</td></tr>
 <tr><td class="keys"><kbd>⌘</kbd><kbd>D</kbd></td><td>Select the word under the cursor; press again to add the next match as another cursor.</td></tr>
 <tr><td class="keys"><kbd>⌃</kbd><kbd>⌘</kbd><kbd>G</kbd></td><td>Select every occurrence.</td></tr>
-<tr><td class="keys">Click with <kbd>⌘</kbd></td><td>Add a cursor where you click.</td></tr>
+<tr><td class="keys">Click with <kbd>⌥</kbd></td><td>Add a cursor where you click.</td></tr>
+<tr><td class="keys">Click with <kbd>⌘</kbd></td><td>Go to the definition of the symbol you click, in a file that has a <a href="#language-servers">language server</a>. In any other file it adds a cursor, as <kbd>⌥</kbd>-click does.</td></tr>
 <tr><td class="keys">Double click, triple click</td><td>Select a word, select a line.</td></tr>
 </tbody></table></div>
 
 <h2 id="find-and-replace">Find and replace</h2>
+<figure class="shot"><img src="assets/shot-find.png" width="1800" height="1131" alt="The mide find bar over a Rust file, showing '1 of 11' and the matches highlighted, with options for case, whole word and regular expression." loading="lazy"><figcaption>Find over mide's own search code: matches highlight as you type, and the bar shows your position.</figcaption></figure>
 <p>Press <kbd>⌘</kbd><kbd>F</kbd> for the find bar, or <kbd>⌥</kbd><kbd>⌘</kbd><kbd>F</kbd> to add the replace row. Matches are highlighted as you type and the bar shows your position, such as "3 of 12". A search never spans a line break, so <code>^</code> and <code>$</code> match at each line's ends.</p>
 <div class="table-wrap"><table>
 <thead><tr><th scope="col">Shortcut</th><th scope="col">What it does</th></tr></thead>
@@ -114,7 +117,28 @@
 <tr><td class="keys"><kbd>⌥</kbd><kbd>⌘</kbd><kbd>↩</kbd></td><td>Replace all, as one undo step.</td></tr>
 <tr><td class="keys"><kbd>Esc</kbd></td><td>Close the bar.</td></tr>
 </tbody></table></div>
-<p>In regular expression mode the replacement can use <code>$1</code> and <code>${name}</code>.</p>
+<p>In regular expression mode the replacement can use <code>$1</code> and <code>${name}</code>. Click the arrow at the left of the find bar to show or hide the replace row. In the find and replace fields, <kbd>⌘</kbd><kbd>A</kbd> selects all, <kbd>⌘</kbd><kbd>C</kbd> and <kbd>⌘</kbd><kbd>X</kbd> copy and cut, and <kbd>⇧</kbd> with the arrow keys extends the selection.</p>
+
+<h2 id="language-servers">Language servers</h2>
+<figure class="shot"><img src="assets/shot-lsp.png" width="1800" height="1131" alt="A Rust file with a red wavy underline at a syntax error; the status bar shows the error count and the message 'Syntax Error: expected SEMICOLON'." loading="lazy"><figcaption>rust-analyzer's findings in the editor: the underline, the count and the message under the caret.</figcaption></figure>
+<p>When a language server is installed for the file you open, mide starts it in the background and shows what it finds: a wavy underline under errors and warnings, the counts in the status bar (click them to jump to the next problem), and the message when the caret is on one. Servers are looked for on your <code>PATH</code> and in the usual install folders (<code>~/.cargo/bin</code>, Homebrew, <code>~/go/bin</code>, <code>~/.npm-global/bin</code>).</p>
+<div class="table-wrap"><table>
+<thead><tr><th scope="col">Language</th><th scope="col">Server (first one installed is used)</th></tr></thead>
+<tbody>
+<tr><td>Rust</td><td><code>rust-analyzer</code> (<code>rustup component add rust-analyzer</code>)</td></tr>
+<tr><td>TypeScript, JavaScript</td><td><code>typescript-language-server</code> (<code>npm install -g typescript typescript-language-server</code>)</td></tr>
+<tr><td>Python</td><td><code>pyright-langserver</code>, <code>basedpyright-langserver</code>, <code>pylsp</code> or <code>ruff server</code></td></tr>
+<tr><td>Go</td><td><code>gopls</code></td></tr>
+<tr><td>C, C++</td><td><code>clangd</code></td></tr>
+<tr><td>Zig, Swift, Bash</td><td><code>zls</code>, <code>sourcekit-lsp</code>, <code>bash-language-server</code></td></tr>
+</tbody></table></div>
+<div class="table-wrap"><table>
+<thead><tr><th scope="col">Shortcut</th><th scope="col">What it does</th></tr></thead>
+<tbody>
+<tr><td class="keys"><kbd>F12</kbd> or click with <kbd>⌘</kbd></td><td>Go to the definition of the symbol under the caret or clicked (also in the command palette).</td></tr>
+<tr><td class="keys"><kbd>F8</kbd> / <kbd>⇧</kbd><kbd>F8</kbd></td><td>Next and previous problem in this file.</td></tr>
+</tbody></table></div>
+<p>If the server is not installed, mide says so once and shows the command to install it. Files over about 3 MB are not sent to a server. When a problem appears is up to the server: for Rust, rust-analyzer reports syntax errors as you type, while compiler errors such as type mismatches come from <code>cargo check</code>, which it runs when you save. Turn the whole feature off with <code>language_servers = false</code> under <code>[workspace]</code>. Code completion and hover are not built yet.</p>
 
 <h2 id="panels-and-views">Panels and views</h2>
 <div class="table-wrap"><table>

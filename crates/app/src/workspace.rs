@@ -24,6 +24,7 @@ use crate::config::{self, Config, Tools};
 use crate::editor::{DiskCheck, EditorEvent, EditorView};
 use crate::session::{SessionState, Store, TabState};
 use crate::fonts::{self, Fonts};
+use crate::lsp;
 use crate::git_view::{GitEvent, GitView};
 use crate::layout::{self, Dock, Layout};
 use crate::perf;
@@ -37,7 +38,7 @@ use crate::search_view::{SearchEvent, SearchView};
 
 actions!(
     workspace,
-    [Save, SaveAs, NewFile, FindInFiles, NewWindow, OpenFolderInNewWindow, SendSelectionToTerminal, SendPathToTerminal, StageHunk, RevertHunk, NextChange, PrevChange, CloseTab, NextTab, PrevTab, Quit, ToggleGit, OpenFolder, QuickOpen, CommandPalette, ToggleTerminal, NewTerminal, ToggleSidebar, CloseFolder, ToggleTheme, GotoLine]
+    [Save, SaveAs, NewFile, FindInFiles, NewWindow, OpenFolderInNewWindow, SendSelectionToTerminal, SendPathToTerminal, StageHunk, RevertHunk, NextChange, PrevChange, GoToDefinition, NextProblem, PrevProblem, CloseTab, NextTab, PrevTab, Quit, ToggleGit, OpenFolder, QuickOpen, CommandPalette, ToggleTerminal, NewTerminal, ToggleSidebar, CloseFolder, ToggleTheme, GotoLine]
 );
 
 /// Payload for dragging the terminal panel by its header to another dock.
@@ -167,6 +168,10 @@ enum PaletteKind {
 const ROW_HEIGHT: f32 = 22.0;
 
 pub struct Workspace {
+    /// Language servers for the open files (diagnostics, go to definition).
+    lsp: lsp::Hub,
+    /// Per editor: the latest scheduled text sync, so only the last pause in typing sends.
+    lsp_sync_gen: HashMap<EntityId, u64>,
     root: Option<PathBuf>,
     tree: Option<FileTree>,
     recent: Vec<PathBuf>,
@@ -218,7 +223,10 @@ pub struct Workspace {
 impl Workspace {
     pub fn new(root: Option<PathBuf>, initial: Option<PathBuf>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         perf::mark("workspace: new() begins");
+        let (lsp_hub, lsp_rx) = lsp::Hub::new();
         let mut ws = Self {
+            lsp: lsp_hub,
+            lsp_sync_gen: HashMap::new(),
             root: None,
             tree: None,
             recent: recent::load(),
@@ -263,6 +271,15 @@ impl Workspace {
             _watcher: None,
         };
         perf::mark("workspace: struct built (syntaxes, layout, recents)");
+        // Messages from language server threads arrive here and are applied on the UI thread.
+        cx.spawn(async move |this: WeakEntity<Self>, cx| {
+            while let Ok(msg) = lsp_rx.recv().await {
+                if this.update(cx, |ws, cx| ws.on_lsp(msg, cx)).is_err() {
+                    break;
+                }
+            }
+        })
+        .detach();
         theme::set(ws.layout.theme);
         window.focus(&ws.focus_handle);
         if let Some(e) = crate::keymap::take_errors().into_iter().next() {
@@ -364,6 +381,8 @@ impl Workspace {
         self.pending_quit = false;
         self.persist_session(cx);
         if close_all {
+            self.lsp.reset();
+            self.lsp_sync_gen.clear();
             // Anything unsaved was just confirmed as discarded.
             self.discard_backups(cx);
             // Dropping a terminal view ends its session without blocking.
@@ -1392,7 +1411,8 @@ impl Workspace {
         let (syntaxes, theme) = (self.syntaxes.clone(), self.theme.clone());
         let p = path.clone();
         let editor = cx.new(|cx| EditorView::new(buffer, Some(p), syntaxes, theme, cx));
-        self.add_tab(editor, window, cx);
+        self.add_tab(editor.clone(), window, cx);
+        self.lsp_sync(&editor, cx);
         if let Some(t) = self.tree.as_mut() {
             let _ = t.reveal(&path);
         }
@@ -1404,8 +1424,11 @@ impl Workspace {
 
     fn add_tab(&mut self, editor: Entity<EditorView>, window: &mut Window, cx: &mut Context<Self>) {
         cx.observe(&editor, |_, _, cx| cx.notify()).detach();
-        cx.subscribe_in(&editor, window, |ws, _, ev: &EditorEvent, _, cx| match ev {
+        cx.subscribe_in(&editor, window, |ws, ed, ev: &EditorEvent, window, cx| match ev {
             EditorEvent::ContextMenu(pos) => ws.show_editor_menu(*pos, cx),
+            EditorEvent::TextChanged => ws.lsp_changed(ed, cx),
+            EditorEvent::Saved => ws.lsp_saved(ed, cx),
+            EditorEvent::CmdClick(at) => ws.cmd_click(ed, *at, window, cx),
         })
         .detach();
         let root = self.root.clone();
@@ -1469,6 +1492,7 @@ impl Workspace {
             store.clear_backup(root, path);
         }
         self.backup_revs.remove(&editor.entity_id());
+        self.lsp_closed(&editor, cx);
         self.pending_discard = None;
         self.tabs.remove(i);
         if i < self.active || self.active >= self.tabs.len() {
@@ -1480,6 +1504,205 @@ impl Workspace {
             self.activate(self.active, window, cx);
         }
         cx.notify();
+    }
+
+    // ---- language servers ----------------------------------------------------------------
+
+    fn lsp_enabled(&self) -> bool {
+        self.config.language_servers && std::env::var_os("MIDE_LSP").is_none_or(|v| v != "0")
+    }
+
+    /// Make the right server know this file's current text: start the server if needed, open the
+    /// file there, or send the new version. Files without a server (or too big) are left alone.
+    fn lsp_sync(&mut self, editor: &Entity<EditorView>, cx: &mut Context<Self>) {
+        if !self.lsp_enabled() {
+            return;
+        }
+        let ed = editor.read(cx);
+        let Some(path) = ed.path.clone() else { return };
+        let Some((key, spec)) = lsp::Hub::key_for(&path, self.root.as_deref(), &ed.syntax_name) else { return };
+        let Some(text) = ed.lsp_text() else { return };
+        self.lsp.ensure_started(&key, &spec);
+        // While the server is still starting, `on_lsp` opens every file once it is ready.
+        if let Some(client) = self.lsp.client(&key) {
+            if client.is_open(&path) {
+                client.did_change(&path, &text);
+            } else {
+                client.did_open(&path, spec.language_id, &text);
+                let known = self.lsp.diagnostics_for(&path);
+                editor.update(cx, |ed, cx| ed.set_diagnostics(known, cx));
+            }
+        }
+    }
+
+    /// The text changed: send it after a short pause in typing.
+    fn lsp_changed(&mut self, editor: &Entity<EditorView>, cx: &mut Context<Self>) {
+        if !self.lsp_enabled() || editor.read(cx).path.is_none() {
+            return;
+        }
+        let id = editor.entity_id();
+        let generation = self.lsp_sync_gen.get(&id).copied().unwrap_or(0) + 1;
+        self.lsp_sync_gen.insert(id, generation);
+        let editor = editor.clone();
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(std::time::Duration::from_millis(250)).await;
+            let _ = this.update(cx, |ws, cx| {
+                if ws.lsp_sync_gen.get(&id) == Some(&generation) {
+                    ws.lsp_sync(&editor, cx);
+                }
+            });
+        })
+        .detach();
+    }
+
+    /// Saved: flush the text now, then say so (servers like rust-analyzer check on save).
+    fn lsp_saved(&mut self, editor: &Entity<EditorView>, cx: &mut Context<Self>) {
+        self.lsp_sync(editor, cx);
+        let ed = editor.read(cx);
+        let Some(path) = ed.path.clone() else { return };
+        if let Some((key, _)) = lsp::Hub::key_for(&path, self.root.as_deref(), &ed.syntax_name) {
+            if let Some(client) = self.lsp.client(&key) {
+                client.did_save(&path);
+            }
+        }
+    }
+
+    /// The tab closed: the server can forget the file.
+    fn lsp_closed(&mut self, editor: &Entity<EditorView>, cx: &mut Context<Self>) {
+        self.lsp_sync_gen.remove(&editor.entity_id());
+        let ed = editor.read(cx);
+        let Some(path) = ed.path.clone() else { return };
+        if let Some((key, _)) = lsp::Hub::key_for(&path, self.root.as_deref(), &ed.syntax_name) {
+            if let Some(client) = self.lsp.client(&key) {
+                if client.is_open(&path) {
+                    client.did_close(&path);
+                }
+            }
+        }
+        self.lsp.forget(&path);
+    }
+
+    /// A message from a language server thread.
+    fn on_lsp(&mut self, msg: lsp::Msg, cx: &mut Context<Self>) {
+        match msg {
+            lsp::Msg::Ready(key, result) => {
+                if let Some(problem) = self.lsp.ready(key.clone(), result) {
+                    self.flash(problem, cx);
+                    return;
+                }
+                // Open every file that was waiting for this server.
+                for editor in self.tabs.clone() {
+                    let belongs = {
+                        let ed = editor.read(cx);
+                        ed.path
+                            .as_deref()
+                            .and_then(|p| lsp::Hub::key_for(p, self.root.as_deref(), &ed.syntax_name))
+                            .is_some_and(|(k, _)| k == key)
+                    };
+                    if belongs {
+                        self.lsp_sync(&editor, cx);
+                    }
+                }
+            }
+            lsp::Msg::Event(key, event) => {
+                if let Some(path) = self.lsp.event(&key, event) {
+                    let list = self.lsp.diagnostics_for(&path);
+                    if let Some(editor) = self.tabs.iter().find(|t| t.read(cx).path.as_deref() == Some(path.as_path())).cloned() {
+                        editor.update(cx, |ed, cx| ed.set_diagnostics(list, cx));
+                    }
+                }
+                cx.notify();
+            }
+        }
+    }
+
+    /// ⌘-click: go to the definition of the symbol clicked, or, in a file no language server handles,
+    /// add a cursor there (what ⌘-click did before language servers).
+    fn cmd_click(&mut self, editor: &Entity<EditorView>, at: usize, window: &mut Window, cx: &mut Context<Self>) {
+        let has_server = {
+            let ed = editor.read(cx);
+            self.lsp_enabled()
+                && ed.path.as_deref().and_then(|p| lsp::Hub::key_for(p, self.root.as_deref(), &ed.syntax_name)).is_some()
+        };
+        if has_server {
+            editor.update(cx, |ed, cx| ed.goto_offset(at, cx));
+            self.go_to_definition(window, cx);
+        } else {
+            editor.update(cx, |ed, cx| ed.add_cursor_at(at, cx));
+        }
+    }
+
+    /// F12: ask the server where the symbol under the caret is defined and go there.
+    fn go_to_definition(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(editor) = self.active_editor().cloned() else { return };
+        let (path, pos, syntax) = {
+            let ed = editor.read(cx);
+            (ed.path.clone(), ed.caret_lsp_position(), ed.syntax_name.clone())
+        };
+        let Some(path) = path else { return };
+        let Some((key, _)) = lsp::Hub::key_for(&path, self.root.as_deref(), &syntax) else {
+            return self.flash(format!("No language server for {syntax} files"), cx);
+        };
+        if !self.lsp_enabled() {
+            return self.flash("Language servers are off ([workspace] language_servers in config.toml)", cx);
+        }
+        self.lsp_sync(&editor, cx); // the server must see exactly what is on screen
+        let Some(client) = self.lsp.client(&key) else {
+            let why = if self.lsp.is_starting(&key) { "The language server is still starting: try again in a moment" } else { "No language server is running for this file" };
+            return self.flash(why, cx);
+        };
+        let (tx, rx) = async_channel::bounded(1);
+        client.definition(&path, pos, move |r| {
+            let _ = tx.send_blocking(r);
+        });
+        cx.spawn_in(window, async move |this, cx| {
+            let Ok(result) = rx.recv().await else { return };
+            let _ = this.update_in(cx, |ws, window, cx| ws.finish_definition(result, window, cx));
+        })
+        .detach();
+    }
+
+    fn finish_definition(&mut self, result: Result<Vec<mide_lsp::Location>, String>, window: &mut Window, cx: &mut Context<Self>) {
+        match result {
+            Err(e) => self.flash(format!("Go to definition: {e}"), cx),
+            Ok(found) if found.is_empty() => self.flash("No definition found", cx),
+            Ok(found) => {
+                let first = found[0].clone();
+                self.open_file(&first.path, window, cx);
+                if let Some(ed) = self.active_editor().cloned() {
+                    ed.update(cx, |ed, cx| {
+                        let at = ed.offset_from_lsp(first.range.start);
+                        ed.goto_offset(at, cx);
+                    });
+                }
+                if found.len() > 1 {
+                    self.flash(format!("{} definitions found; went to the first", found.len()), cx);
+                }
+            }
+        }
+    }
+
+    fn goto_problem(&mut self, forward: bool, cx: &mut Context<Self>) {
+        let Some(editor) = self.active_editor().cloned() else { return };
+        if !editor.update(cx, |ed, cx| ed.goto_diagnostic(forward, cx)) {
+            self.flash("No problems in this file", cx);
+        }
+    }
+
+    /// What the status bar adds for language servers: problem counts, progress, the message under the caret.
+    fn lsp_status(&self, ed: &EditorView) -> String {
+        let mut parts = Vec::new();
+        let totals = lsp::summary(self.lsp.totals());
+        if !totals.is_empty() {
+            parts.push(totals);
+        }
+        if let Some((server, text)) = &self.lsp.progress {
+            parts.push(format!("{server}: {text}"));
+        }
+        if let Some(d) = ed.diagnostic_at_caret() {
+            parts.push(d.message.lines().next().unwrap_or("").to_owned());
+        }
+        parts.join("   ")
     }
 
     fn next_tab(&mut self, _: &NextTab, window: &mut Window, cx: &mut Context<Self>) {
@@ -2263,6 +2486,9 @@ impl Workspace {
             cmd("File: Open Folder in New Window…", "⌥⌘O", Command::OpenFolderInNewWindow),
             cmd("Git: Stage Hunk", "", Command::StageHunk),
             cmd("Git: Revert Hunk", "", Command::RevertHunk),
+            cmd("Language: Go to Definition", "F12", Command::GoToDefinition),
+            cmd("Language: Next Problem", "F8", Command::NextProblem),
+            cmd("Language: Previous Problem", "⇧F8", Command::PrevProblem),
             cmd("Git: Next Change", "⌥⌘↓", Command::NextChange),
             cmd("Git: Previous Change", "⌥⌘↑", Command::PrevChange),
             cmd("Terminal: Send Selection", "", Command::SendSelection),
@@ -2341,6 +2567,9 @@ impl Workspace {
                 Command::FindInFiles => self.find_in_files(&FindInFiles, window, cx),
                 Command::StageHunk => self.stage_hunk(cx),
                 Command::RevertHunk => self.revert_hunk(cx),
+                Command::GoToDefinition => self.go_to_definition(window, cx),
+                Command::NextProblem => self.goto_problem(true, cx),
+                Command::PrevProblem => self.goto_problem(false, cx),
                 Command::NextChange | Command::PrevChange => {
                     let fwd = c == Command::NextChange;
                     if let Some(ed) = self.active_editor().cloned() {
@@ -2870,6 +3099,7 @@ impl Render for Workspace {
         }
 
         let (left, right) = self.status_text(cx);
+        let problems = self.active_editor().map(|e| self.lsp_status(e.read(cx))).unwrap_or_default();
         let editor_area = match self.active_editor() {
             Some(ed) => div().flex_1().min_h_0().child(ed.clone()),
             None => div()
@@ -2939,6 +3169,9 @@ impl Render for Workspace {
             .on_action(cx.listener(Self::open_folder_in_new_window))
             .on_action(cx.listener(|this, _: &StageHunk, _, cx| this.stage_hunk(cx)))
             .on_action(cx.listener(|this, _: &RevertHunk, _, cx| this.revert_hunk(cx)))
+            .on_action(cx.listener(|this, _: &GoToDefinition, window, cx| this.go_to_definition(window, cx)))
+            .on_action(cx.listener(|this, _: &NextProblem, _, cx| this.goto_problem(true, cx)))
+            .on_action(cx.listener(|this, _: &PrevProblem, _, cx| this.goto_problem(false, cx)))
             .on_action(cx.listener(|this, _: &NextChange, _, cx| {
                 if let Some(ed) = this.active_editor().cloned() {
                     ed.update(cx, |ed, cx| ed.goto_change(true, cx));
@@ -2995,13 +3228,30 @@ impl Render for Workspace {
                     .text_size(px(11.))
                     .child(
                         div()
-                            .id("status-left")
-                            .cursor_pointer()
-                            .hover(|h| h.text_color(rgb(ui().status_hover_text)))
-                            .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
-                                this.set_git_visible(!this.show_git, window, cx)
-                            }))
-                            .child(left),
+                            .flex()
+                            .items_center()
+                            .gap(px(24.))
+                            .child(
+                                div()
+                                    .id("status-left")
+                                    .cursor_pointer()
+                                    .hover(|h| h.text_color(rgb(ui().status_hover_text)))
+                                    .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                                        this.set_git_visible(!this.show_git, window, cx)
+                                    }))
+                                    .child(left),
+                            )
+                            // Problems from the language server: a click steps to the next one.
+                            .when(!problems.is_empty(), |d| {
+                                d.child(
+                                    div()
+                                        .id("status-problems")
+                                        .cursor_pointer()
+                                        .hover(|h| h.text_color(rgb(ui().status_hover_text)))
+                                        .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.goto_problem(true, cx)))
+                                        .child(problems),
+                                )
+                            }),
                     )
                     .child(
                         div()

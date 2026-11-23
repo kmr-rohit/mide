@@ -5,44 +5,34 @@
 
 <h2>Solid today</h2>
 <ul>
-  <li>Opening, editing and saving files of any practical size, with multi-cursor, find and replace, and the common line commands.</li>
-  <li>Syntax highlighting for the languages in the Sublime and bat grammar sets.</li>
-  <li>A git window with history, diffs, staging, commit, push, pull, branches and stash.</li>
-  <li>Terminal sessions with profiles, docking, mouse support, Claude Code and GitHub Copilot.</li>
-  <li>Light and dark themes, a command palette, go-to-file and a saved layout.</li>
+  <li>Opening, editing and saving files of any practical size, with multi-cursor, find and replace, find in files, and the common line commands. Find on a million-line file takes about a millisecond.</li>
+  <li>Safety nets: files changed on disk are noticed, tabs and unsaved edits come back after a quit or crash, and binary files are refused before they are read.</li>
+  <li>Syntax highlighting for the languages in the Sublime and bat grammar sets, indentation detection, auto-indent and auto-closing brackets.</li>
+  <li>A git window with history, side-by-side diffs, staging, commit, push, pull, branches and stash, plus gutter markers, hunk staging and blame in the editor.</li>
+  <li>Terminal sessions with profiles, docking, mouse support, Claude Code and GitHub Copilot, and sending a selection or file path to a session.</li>
+  <li>Right-click menus, draggable tabs, multiple windows, a keymap file, light and dark themes, a command palette and go-to-file.</li>
 </ul>
 
 <h2>Next up</h2>
-<p>Things that can cost you work are first.</p>
 <ol>
-  <li><strong>Notice files that change on disk.</strong> Today an open file is not refreshed when a formatter or <code>git checkout</code> changes it, and saving would overwrite that change. Clean buffers should reload, and edited ones should ask.</li>
-  <li><strong>Restore your session.</strong> Reopen tabs, positions and layout after a quit or crash, and back up unsaved edits.</li>
-  <li><strong>New file, Save As, and file operations</strong> in the sidebar: create, rename, delete, reveal in Finder.</li>
-  <li><strong>Find in files.</strong></li>
+  <li><strong>More language server features:</strong> code completion, hover documentation, go to symbol, rename and find references. Errors, warnings and Go to Definition already work.</li>
+  <li><strong>Signed and notarized installer</strong>, so it opens without a warning, plus a disk image and Homebrew.</li>
+  <li><strong>Editor layout:</strong> split panes, soft wrap, code folding and a minimap.</li>
+  <li><strong>Linux support.</strong> The GPU toolkit runs there; the terminal, file watching and packaging need work.</li>
 </ol>
-
-<h2>Soon after</h2>
-<ul>
-  <li>Detect indentation (2 or 4 spaces, or tabs) per file, and auto-indent.</li>
-  <li>Scrollbars and a minimap, soft wrap, split panes, code folding.</li>
-  <li>A virtualized sidebar for very large folders.</li>
-  <li>Tab bar overflow and reordering; right-click menus.</li>
-  <li>Language server support: completion, go to definition, diagnostics.</li>
-  <li>A faster path for extremely long lines, and a background search for huge files.</li>
-</ul>
 
 <h2>Git and terminal depth</h2>
 <ul>
-  <li>Stage by hunk and by line, resolve conflicts, show blame and change markers in the gutter, rebase, delete and rename branches, search history.</li>
+  <li>Stage by line, resolve conflicts, rebase, delete and rename branches, search history.</li>
   <li>Search in the terminal, clickable links and paths, split sessions.</li>
-  <li>Send the current file or selection to a Claude or Copilot session, and open the files an agent just changed.</li>
+  <li>Send the current diff to an agent session, and open the files an agent just changed.</li>
 </ul>
 
-<h2>Distribution</h2>
+<h2>Later</h2>
 <ul>
-  <li>Developer ID signing and Apple notarization, so the installer opens without a warning.</li>
-  <li>A universal package for Intel Macs published with every release, and Homebrew.</li>
   <li>Automatic updates and a diagnostics file for bug reports.</li>
+  <li>A faster path for extremely long lines (a 3 MB minified line costs about 47 ms per keystroke today).</li>
+  <li>A settings screen, so the TOML file is optional.</li>
 </ul>
 
 <h2>Help shape it</h2>

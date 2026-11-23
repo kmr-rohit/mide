@@ -11,9 +11,17 @@
 </ul>
 
 <h2>Install from the terminal</h2>
-<p>The quickest way, on Apple Silicon or Intel. It downloads the universal package and installs it; macOS does not show the unverified-developer warning for packages installed this way.</p>
-<pre><code>curl -fsSL -o /tmp/mide.pkg https://github.com/{{repo}}/releases/latest/download/mide-{{version}}-universal.pkg && sudo installer -pkg /tmp/mide.pkg -target /</code></pre>
-<p>Then run <code>mide .</code> in a project folder.</p>
+<p>The quickest way, on Apple Silicon or Intel. One command downloads the latest release, checks its checksum, installs <strong>mide.app</strong> and adds the <code>mide</code> command. macOS does not show the unverified-developer warning for files fetched this way.</p>
+<pre><code>curl -fsSL https://raw.githubusercontent.com/{{repo}}/main/scripts/install.sh | sh</code></pre>
+<p>Then run <code>mide .</code> in a project folder. Releases that include a disk image install without a password, into <code>/Applications</code> (or <code>~/Applications</code> if that is not writable). Older releases use the installer package and ask for your password once.</p>
+<p>You can read the script first: it is <a href="https://github.com/{{repo}}/blob/main/scripts/install.sh"><code>scripts/install.sh</code></a>, about a hundred lines.</p>
+
+<h2>Install with a disk image</h2>
+<ol>
+  <li>Download <code>mide-{{version}}-universal.dmg</code> from the <a href="https://github.com/{{repo}}/releases/latest">latest release</a>, if it lists one.</li>
+  <li>Open it and drag <strong>mide</strong> onto <strong>Applications</strong>.</li>
+</ol>
+<p>The same Gatekeeper note as below applies until the app is notarized.</p>
 
 <h2>Install with the package</h2>
 <ol>
@@ -58,8 +66,11 @@ scripts/pkg.sh                 # build dist/mide-{{version}}-arm64.pkg
 scripts/pkg.sh --universal     # Apple Silicon and Intel in one package</code></pre>
 
 <h2>Update</h2>
-<p>Run the newer installer; it replaces the app in place. Your settings in <code>~/.config/mide</code> are kept.</p>
+<p>Run the install command again, or open a newer installer; it replaces the app in place. Your settings in <code>~/.config/mide</code> are kept.</p>
 
 <h2>Uninstall</h2>
+<p>If you installed with the script, download it and run it with <code>--uninstall</code>; it removes only the app and the <code>mide</code> link it knows about:</p>
+<pre><code>curl -fsSL -o /tmp/mide-install.sh https://raw.githubusercontent.com/{{repo}}/main/scripts/install.sh &amp;&amp; sh /tmp/mide-install.sh --uninstall</code></pre>
+<p>Or by hand (packages put the app in <code>/Applications</code> as root, hence <code>sudo</code>):</p>
 <pre><code>sudo rm -rf /Applications/mide.app /usr/local/bin/mide
 rm -rf ~/.config/mide      # optional: settings, recent folders, trusted folders</code></pre>

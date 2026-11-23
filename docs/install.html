@@ -36,7 +36,7 @@
   </div>
 </header>
 <main id="main">
-<div class="wrap page"><aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><ul><li><a href="#requirements">Requirements</a></li><li><a href="#install-from-the-terminal">Install from the terminal</a></li><li><a href="#install-with-the-package">Install with the package</a></li><li><a href="#first-launch">First launch</a></li><li><a href="#the-mide-command">The mide command</a></li><li><a href="#build-from-source">Build from source</a></li><li><a href="#update">Update</a></li><li><a href="#uninstall">Uninstall</a></li></ul></aside><article class="prose"><h1>Install mide</h1>
+<div class="wrap page"><aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><ul><li><a href="#requirements">Requirements</a></li><li><a href="#install-from-the-terminal">Install from the terminal</a></li><li><a href="#install-with-a-disk-image">Install with a disk image</a></li><li><a href="#install-with-the-package">Install with the package</a></li><li><a href="#first-launch">First launch</a></li><li><a href="#the-mide-command">The mide command</a></li><li><a href="#build-from-source">Build from source</a></li><li><a href="#update">Update</a></li><li><a href="#uninstall">Uninstall</a></li></ul></aside><article class="prose"><h1>Install mide</h1>
 <p class="lead">A macOS installer, or build it yourself in a few commands.</p>
 
 <h2 id="requirements">Requirements</h2>
@@ -47,9 +47,17 @@
 </ul>
 
 <h2 id="install-from-the-terminal">Install from the terminal</h2>
-<p>The quickest way, on Apple Silicon or Intel. It downloads the universal package and installs it; macOS does not show the unverified-developer warning for packages installed this way.</p>
-<pre><code>curl -fsSL -o /tmp/mide.pkg https://github.com/kmr-rohit/mide/releases/latest/download/mide-0.2.0-universal.pkg && sudo installer -pkg /tmp/mide.pkg -target /</code></pre>
-<p>Then run <code>mide .</code> in a project folder.</p>
+<p>The quickest way, on Apple Silicon or Intel. One command downloads the latest release, checks its checksum, installs <strong>mide.app</strong> and adds the <code>mide</code> command. macOS does not show the unverified-developer warning for files fetched this way.</p>
+<pre><code>curl -fsSL https://raw.githubusercontent.com/kmr-rohit/mide/main/scripts/install.sh | sh</code></pre>
+<p>Then run <code>mide .</code> in a project folder. Releases that include a disk image install without a password, into <code>/Applications</code> (or <code>~/Applications</code> if that is not writable). Older releases use the installer package and ask for your password once.</p>
+<p>You can read the script first: it is <a href="https://github.com/kmr-rohit/mide/blob/main/scripts/install.sh"><code>scripts/install.sh</code></a>, about a hundred lines.</p>
+
+<h2 id="install-with-a-disk-image">Install with a disk image</h2>
+<ol>
+  <li>Download <code>mide-0.2.0-universal.dmg</code> from the <a href="https://github.com/kmr-rohit/mide/releases/latest">latest release</a>, if it lists one.</li>
+  <li>Open it and drag <strong>mide</strong> onto <strong>Applications</strong>.</li>
+</ol>
+<p>The same Gatekeeper note as below applies until the app is notarized.</p>
 
 <h2 id="install-with-the-package">Install with the package</h2>
 <ol>
@@ -94,9 +102,12 @@ scripts/pkg.sh                 # build dist/mide-0.2.0-arm64.pkg
 scripts/pkg.sh --universal     # Apple Silicon and Intel in one package</code></pre>
 
 <h2 id="update">Update</h2>
-<p>Run the newer installer; it replaces the app in place. Your settings in <code>~/.config/mide</code> are kept.</p>
+<p>Run the install command again, or open a newer installer; it replaces the app in place. Your settings in <code>~/.config/mide</code> are kept.</p>
 
 <h2 id="uninstall">Uninstall</h2>
+<p>If you installed with the script, download it and run it with <code>--uninstall</code>; it removes only the app and the <code>mide</code> link it knows about:</p>
+<pre><code>curl -fsSL -o /tmp/mide-install.sh https://raw.githubusercontent.com/kmr-rohit/mide/main/scripts/install.sh &amp;&amp; sh /tmp/mide-install.sh --uninstall</code></pre>
+<p>Or by hand (packages put the app in <code>/Applications</code> as root, hence <code>sudo</code>):</p>
 <pre><code>sudo rm -rf /Applications/mide.app /usr/local/bin/mide
 rm -rf ~/.config/mide      # optional: settings, recent folders, trusted folders</code></pre>
 </article></div>

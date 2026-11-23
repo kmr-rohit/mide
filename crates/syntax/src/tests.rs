@@ -168,7 +168,9 @@ fn a_far_jump_is_instant_and_matches_the_exact_result_for_ordinary_code() {
     let far = h.highlight_window(7000, 30, |i| doc[i].clone());
     let took = started.elapsed();
     assert!(far.approximate, "7000 lines past anything parsed must not be parsed in full");
-    assert!(took < std::time::Duration::from_millis(500), "took {took:?}");
+    // Parsing every line above the jump takes many seconds in a debug build; the limit only has to
+    // tell that apart from a slow shared CI runner (this once failed at 561 ms against a 500 ms limit).
+    assert!(took < std::time::Duration::from_millis(1500), "took {took:?}");
     assert_eq!(far.lines.len(), 30);
 
     // Plain code has no multi-line state, so the shortcut agrees with the full parse.

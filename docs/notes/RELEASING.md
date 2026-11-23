@@ -27,6 +27,15 @@
 3. `git tag v0.1.0 && git push --tags`. The *Release* workflow tests, builds the arm64 and universal packages,
    signs and notarizes them if the secrets exist, and attaches them (with `.sha256` files) to a GitHub release.
 
+## Disk image and Homebrew
+
+The release workflow also attaches a drag-to-Applications `mide-<version>-universal.dmg` (`scripts/dmg.sh`, which
+packages `target/bundle/mide.app` and is signed and notarized with the same secrets) and a ready-made Homebrew cask,
+`mide.rb` (`scripts/cask.sh`, filled in from the universal package's checksum).
+
+To publish the cask, create a GitHub repo named `homebrew-mide`, copy `mide.rb` from the release to `Casks/mide.rb`
+and push. Users then run `brew install --cask <you>/mide/mide`. Update the file for every release.
+
 ## Building a package by hand
 
 ```sh

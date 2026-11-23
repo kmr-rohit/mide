@@ -18,6 +18,7 @@ use gpui::{
 use mide_core::search::{self, Matcher, Query};
 use mide_git::fileinfo::{self, BlameLine, Change, ChangeKind};
 use mide_core::{Buffer, Motion, Selection};
+use mide_lsp::{pos as lsp_pos, types::Position as LspPos, Diagnostic, Severity};
 use mide_syntax::{DocHighlighter, Rgb, Span, Syntaxes, Theme};
 
 use crate::find_bar::{FindBar, FindEvent};
@@ -46,6 +47,8 @@ actions!(
 const MAX_MATCHES: usize = 10_000;
 /// Buffers up to this many chars are searched on the UI thread (a few ms at most); bigger ones in the background.
 const SYNC_FIND_CHARS: usize = 4_000_000;
+/// Files bigger than this many chars are not sent to a language server (it would re-send the whole text on every pause).
+pub const LSP_MAX_CHARS: usize = 3_000_000;
 /// Background for every find match (the current one is also selected).
 const FIND_MATCH_BG: u32 = 0x6b5a2a;
 
@@ -237,6 +240,8 @@ pub struct EditorView {
     find_origin: usize,
     /// Bumped for every search; a background search whose number is stale is dropped.
     find_gen: u64,
+    /// What the language server reports for this file, sorted by position.
+    pub diagnostics: Arc<Vec<Diagnostic>>,
     /// Set when an input arrives; cleared at the end of the paint it causes.
     last_input: Option<Instant>,
 }
@@ -283,6 +288,7 @@ impl EditorView {
             find_matches: Vec::new(),
             find_origin: 0,
             find_gen: 0,
+            diagnostics: Arc::new(Vec::new()),
             last_input: None,
         }
     }
@@ -300,6 +306,7 @@ impl EditorView {
         self.approx_spans.clear();
         self.highlighter.invalidate_from(0);
         self.reveal_cursor = true;
+        cx.emit(EditorEvent::TextChanged);
         cx.notify();
     }
 
@@ -337,6 +344,7 @@ impl EditorView {
         }
         self.buffer.save(&path).map_err(|e| format!("Save failed: {e}"))?;
         self.disk = disk_sig(&path);
+        cx.emit(EditorEvent::Saved);
         cx.notify();
         Ok(())
     }
@@ -357,6 +365,8 @@ impl EditorView {
         self.disk = disk_sig(&path);
         self.disk_conflict = false;
         self.path = Some(path);
+        self.diagnostics = Arc::new(Vec::new());
+        cx.emit(EditorEvent::TextChanged);
         cx.notify();
     }
 
@@ -382,6 +392,7 @@ impl EditorView {
             Ok(fresh) => {
                 self.replace_buffer(fresh);
                 self.disk = Some(now);
+                cx.emit(EditorEvent::TextChanged);
                 cx.notify();
                 DiskCheck::Reloaded
             }
@@ -397,6 +408,7 @@ impl EditorView {
         self.replace_buffer(fresh);
         self.disk = disk_sig(&path);
         self.disk_conflict = false;
+        cx.emit(EditorEvent::TextChanged);
         cx.notify();
         Ok(())
     }
@@ -565,6 +577,80 @@ impl EditorView {
         Some(format!("{}, {}: {}", b.author, fileinfo::ago(now, b.time), b.summary))
     }
 
+    // ---- language server ------------------------------------------------------------
+
+    /// The text to send to a language server, or `None` for a file too big to keep in sync.
+    pub fn lsp_text(&self) -> Option<String> {
+        (self.buffer.len_chars() <= LSP_MAX_CHARS).then(|| self.buffer.text())
+    }
+
+    pub fn set_diagnostics(&mut self, mut list: Vec<Diagnostic>, cx: &mut Context<Self>) {
+        list.sort_by_key(|d| (d.range.start.line, d.range.start.character));
+        if *self.diagnostics != list {
+            self.diagnostics = Arc::new(list);
+            cx.notify();
+        }
+    }
+
+    /// An offset as the language server wants it: 0-based line, UTF-16 column.
+    pub fn lsp_position(&self, offset: usize) -> LspPos {
+        let (line, col) = self.buffer.line_col(offset);
+        LspPos { line: line as u32, character: lsp_pos::char_to_utf16(&self.buffer.line(line), col) as u32 }
+    }
+
+    /// The char offset for a server position, clamped into the document.
+    pub fn offset_from_lsp(&self, p: LspPos) -> usize {
+        let line = (p.line as usize).min(self.buffer.len_lines().saturating_sub(1));
+        let col = lsp_pos::utf16_to_char(&self.buffer.line(line), p.character as usize);
+        self.buffer.offset_of(line, col)
+    }
+
+    /// Where the primary caret is, for language server requests.
+    pub fn caret_lsp_position(&self) -> LspPos {
+        self.lsp_position(self.buffer.selections().last().map_or(0, |s| s.head))
+    }
+
+    /// The most severe diagnostic under the caret (or touching it).
+    pub fn diagnostic_at_caret(&self) -> Option<&Diagnostic> {
+        let at = self.caret_lsp_position();
+        let key = (at.line, at.character);
+        self.diagnostics
+            .iter()
+            .filter(|d| (d.range.start.line, d.range.start.character) <= key && key <= (d.range.end.line, d.range.end.character))
+            .min_by_key(|d| d.severity)
+    }
+
+    /// Move to the next (or previous) diagnostic, wrapping. False when there are none.
+    pub fn goto_diagnostic(&mut self, forward: bool, cx: &mut Context<Self>) -> bool {
+        let at = self.caret_lsp_position();
+        let key = (at.line, at.character);
+        let start = |d: &Diagnostic| (d.range.start.line, d.range.start.character);
+        let list = &self.diagnostics;
+        let target = if forward {
+            list.iter().find(|d| start(d) > key).or(list.first())
+        } else {
+            list.iter().rev().find(|d| start(d) < key).or(list.last())
+        };
+        let Some(pos) = target.map(|d| d.range.start) else { return false };
+        let at = self.offset_from_lsp(pos);
+        self.goto_offset(at, cx);
+        true
+    }
+
+    /// Add another caret at a char offset (⌥-click, or ⌘-click in a file with no language server).
+    pub fn add_cursor_at(&mut self, offset: usize, cx: &mut Context<Self>) {
+        self.marked = None;
+        self.buffer.add_cursor(offset);
+        self.touched(cx);
+    }
+
+    /// Put the caret at a char offset and scroll it into view.
+    pub fn goto_offset(&mut self, offset: usize, cx: &mut Context<Self>) {
+        self.marked = None;
+        self.buffer.set_cursor(offset);
+        self.touched(cx);
+    }
+
     // ---- change bookkeeping --------------------------------------------------
 
     fn after_edit(&mut self, cx: &mut Context<Self>) {
@@ -577,6 +663,7 @@ impl EditorView {
         if self.find_bar.is_some() {
             self.recompute_find(false, cx); // the matches moved with the text
         }
+        cx.emit(EditorEvent::TextChanged);
         self.touched(cx);
     }
 
@@ -897,10 +984,14 @@ impl EditorView {
         }
         let Some(off) = self.offset_for_point(e.position) else { return };
         self.marked = None;
+        if e.click_count == 1 && e.modifiers.platform && !e.modifiers.shift {
+            cx.emit(EditorEvent::CmdClick(off));
+            return;
+        }
         self.selecting = true;
         match e.click_count {
             1 if e.modifiers.shift => self.buffer.extend_primary_to(off),
-            1 if e.modifiers.platform => self.buffer.add_cursor(off),
+            1 if e.modifiers.alt => self.buffer.add_cursor(off),
             1 => self.buffer.set_cursor(off),
             2 => self.buffer.select_word_at(off),
             _ => self.buffer.select_line_at(off),
@@ -1048,6 +1139,12 @@ impl EditorView {
 pub enum EditorEvent {
     /// Right-click at this window position.
     ContextMenu(Point<Pixels>),
+    /// The text (or the file it belongs to) changed; language servers need the new version.
+    TextChanged,
+    /// The file was written to disk.
+    Saved,
+    /// ⌘-click at this char offset: go to the definition there, or add a cursor if there is no language server.
+    CmdClick(usize),
 }
 
 impl gpui::EventEmitter<EditorEvent> for EditorView {}
@@ -1428,11 +1525,16 @@ impl gpui::Element for EditorElement {
             let base = ed.theme.base_style();
             let mut rows = Vec::with_capacity(count);
             let mut numbers = Vec::with_capacity(count);
+            let marks = diagnostic_marks(&ed.diagnostics, first_line, first_line + count);
             for i in first_line..first_line + count {
                 let line = ed.buffer.line(i);
                 let exp = Expanded::new(&line);
                 let spans = ed.line_spans.get(&i).or_else(|| ed.approx_spans.get(&i)).cloned().unwrap_or_default();
-                let runs = build_runs(&exp, &spans, &ed.theme, base.fg);
+                let mut runs = build_runs(&exp, &spans, &ed.theme, base.fg);
+                if let Some(on_line) = marks.get(&i) {
+                    let ranges = squiggle_ranges(&line, &exp, on_line);
+                    runs = apply_underlines(runs, &ranges);
+                }
                 let shaped = window.text_system().shape_line(
                     SharedString::from(exp.text.clone()),
                     font_size,
@@ -1684,6 +1786,93 @@ impl gpui::Element for EditorElement {
     }
 }
 
+// ---- diagnostics underlines --------------------------------------------------------
+
+/// Where a diagnostic touches one line: UTF-16 columns, `u32::MAX` meaning "to the end of the line".
+type LineMark = (u32, u32, Severity);
+
+/// The diagnostics that touch lines `first..last`, split per line.
+fn diagnostic_marks(diagnostics: &[Diagnostic], first: usize, last: usize) -> std::collections::HashMap<usize, Vec<LineMark>> {
+    let mut by_line: std::collections::HashMap<usize, Vec<LineMark>> = std::collections::HashMap::new();
+    for d in diagnostics {
+        let (s, e) = (d.range.start, d.range.end);
+        if (e.line as usize) < first || (s.line as usize) >= last {
+            continue;
+        }
+        for l in (s.line as usize).max(first)..=(e.line as usize).min(last.saturating_sub(1)) {
+            let from = if l == s.line as usize { s.character } else { 0 };
+            let to = if l == e.line as usize { e.character } else { u32::MAX };
+            by_line.entry(l).or_default().push((from, to, d.severity));
+        }
+    }
+    // Least severe first, so a more severe mark painted later wins where they overlap.
+    for v in by_line.values_mut() {
+        v.sort_by_key(|m| std::cmp::Reverse(m.2));
+    }
+    by_line
+}
+
+fn severity_color(s: Severity) -> Hsla {
+    gpui::rgb(match s {
+        Severity::Error => 0xf14c4c,
+        Severity::Warning => 0xd7a72b,
+        Severity::Info => 0x4c9be8,
+        Severity::Hint => 0x8a8f98,
+    })
+    .into()
+}
+
+/// Display-byte ranges (in the tab-expanded line) to underline, with their colors.
+fn squiggle_ranges(line: &str, exp: &Expanded, marks: &[LineMark]) -> Vec<(usize, usize, Hsla)> {
+    let chars = line.chars().count();
+    if chars == 0 {
+        return Vec::new();
+    }
+    marks
+        .iter()
+        .map(|&(from, to, sev)| {
+            let mut a = lsp_pos::utf16_to_char(line, from as usize).min(chars - 1);
+            let mut b = if to == u32::MAX { chars } else { lsp_pos::utf16_to_char(line, to as usize).min(chars) };
+            if b <= a {
+                // An empty range (a caret position): underline the character it sits on.
+                b = (a + 1).min(chars);
+                a = b - 1;
+            }
+            (exp.display_of(byte_of_col(line, a)), exp.display_of(byte_of_col(line, b)), severity_color(sev))
+        })
+        .collect()
+}
+
+/// Give the parts of `runs` covered by `marks` a wavy underline. Later marks win where they overlap.
+fn apply_underlines(runs: Vec<TextRun>, marks: &[(usize, usize, Hsla)]) -> Vec<TextRun> {
+    if marks.is_empty() {
+        return runs;
+    }
+    let mut cuts: Vec<usize> = marks.iter().flat_map(|m| [m.0, m.1]).collect();
+    cuts.sort_unstable();
+    cuts.dedup();
+    let mut out = Vec::with_capacity(runs.len() + cuts.len());
+    let mut pos = 0;
+    for run in runs {
+        let end = pos + run.len;
+        let mut start = pos;
+        let mut points: Vec<usize> = cuts.iter().copied().filter(|&c| c > start && c < end).collect();
+        points.push(end);
+        for stop in points {
+            let covering = marks.iter().rev().find(|m| m.0 <= start && start < m.1);
+            let mut piece = run.clone();
+            piece.len = stop - start;
+            if let Some(&(_, _, color)) = covering {
+                piece.underline = Some(UnderlineStyle { color: Some(color), thickness: px(1.), wavy: true });
+            }
+            out.push(piece);
+            start = stop;
+        }
+        pos = end;
+    }
+    out
+}
+
 fn build_runs(exp: &Expanded, spans: &[Span], theme: &Theme, base_fg: Rgb) -> Vec<TextRun> {
     let total = exp.text.len();
     let mk = |len: usize, fg: Rgb, bold: bool, italic: bool, underline: bool| TextRun {
@@ -1801,5 +1990,72 @@ mod tests {
         assert_eq!(comment_token("Plain Text"), "//");
         assert_eq!(comment_token("LaTeX"), "%");
         assert_eq!(comment_token("Markdown"), "//");
+    }
+
+    // ---- diagnostics underlines ----
+
+    use mide_lsp::types::{Position as P, Range as R};
+
+    fn run(len: usize) -> TextRun {
+        TextRun { len, font: font(false, false), color: hsla(Rgb { r: 255, g: 255, b: 255 }), background_color: None, underline: None, strikethrough: None }
+    }
+
+    fn lens(runs: &[TextRun]) -> Vec<(usize, bool)> {
+        runs.iter().map(|r| (r.len, r.underline.is_some())).collect()
+    }
+
+    #[test]
+    fn underlines_split_runs_at_the_mark_edges_and_keep_the_total_length() {
+        let red: Hsla = gpui::rgb(0xff0000).into();
+        let out = apply_underlines(vec![run(5), run(5)], &[(3, 7, red)]);
+        assert_eq!(lens(&out), [(3, false), (2, true), (2, true), (3, false)]);
+        assert_eq!(out.iter().map(|r| r.len).sum::<usize>(), 10);
+        assert!(out[1].underline.unwrap().wavy);
+        // No marks: untouched.
+        assert_eq!(lens(&apply_underlines(vec![run(4)], &[])), [(4, false)]);
+        // A mark covering everything, and one that starts at 0.
+        assert_eq!(lens(&apply_underlines(vec![run(4)], &[(0, 4, red)])), [(4, true)]);
+        assert_eq!(lens(&apply_underlines(vec![run(4)], &[(0, 2, red)])), [(2, true), (2, false)]);
+    }
+
+    #[test]
+    fn a_later_mark_wins_where_marks_overlap() {
+        let (warn, err): (Hsla, Hsla) = (gpui::rgb(0xd7a72b).into(), gpui::rgb(0xf14c4c).into());
+        let out = apply_underlines(vec![run(10)], &[(0, 8, warn), (4, 6, err)]);
+        assert_eq!(lens(&out).iter().map(|x| x.0).collect::<Vec<_>>(), [4, 2, 2, 2]);
+        assert_eq!(out[1].underline.unwrap().color, Some(err));
+        assert_eq!(out[0].underline.unwrap().color, Some(warn));
+        assert_eq!(out[2].underline.unwrap().color, Some(warn));
+        assert!(out[3].underline.is_none());
+    }
+
+    fn diag(sl: u32, sc: u32, el: u32, ec: u32, severity: Severity) -> Diagnostic {
+        Diagnostic { range: R { start: P { line: sl, character: sc }, end: P { line: el, character: ec } }, severity, message: "m".into(), source: None, code: None }
+    }
+
+    #[test]
+    fn multi_line_diagnostics_are_split_per_line_and_least_severe_first() {
+        let ds = [diag(1, 4, 3, 2, Severity::Warning), diag(2, 0, 2, 3, Severity::Error), diag(9, 0, 9, 1, Severity::Error)];
+        let marks = diagnostic_marks(&ds, 0, 5);
+        assert_eq!(marks[&1], [(4, u32::MAX, Severity::Warning)]);
+        assert_eq!(marks[&2], [(0, u32::MAX, Severity::Warning), (0, 3, Severity::Error)], "the error is painted last, so it wins");
+        assert_eq!(marks[&3], [(0, 2, Severity::Warning)]);
+        assert!(!marks.contains_key(&9), "outside the visible lines");
+        assert!(!marks.contains_key(&0));
+    }
+
+    #[test]
+    fn squiggles_handle_tabs_wide_chars_and_empty_ranges() {
+        let line = "\tlet 😀x = 1;";
+        let exp = Expanded::new(line);
+        // "x" is char column 6 (tab, l, e, t, space, emoji, x), UTF-16 column 7 because the emoji takes two units.
+        let r = squiggle_ranges(line, &exp, &[(7, 8, Severity::Error)]);
+        let x_start = exp.display_of(byte_of_col(line, 6));
+        assert_eq!((r[0].0, r[0].1), (x_start, x_start + 1));
+        // An empty range underlines the char it sits on; one at the very end falls back to the last char.
+        let r = squiggle_ranges("ab", &Expanded::new("ab"), &[(1, 1, Severity::Hint), (9, 9, Severity::Hint)]);
+        assert_eq!((r[0].0, r[0].1), (1, 2));
+        assert_eq!((r[1].0, r[1].1), (1, 2));
+        assert!(squiggle_ranges("", &Expanded::new(""), &[(0, 1, Severity::Error)]).is_empty());
     }
 }

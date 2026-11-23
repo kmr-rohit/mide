@@ -55,6 +55,9 @@ jobs:
         run: |
           scripts/pkg.sh                # Apple Silicon
           scripts/pkg.sh --universal    # Apple Silicon + Intel
+          # The universal bundle is still in target/bundle: wrap it in a drag-to-Applications image.
+          scripts/dmg.sh
+          scripts/cask.sh > dist/mide.rb    # Homebrew cask for the tap (see docs/notes/RELEASING.md)
           ls -la dist
 
       - name: Publish
@@ -62,5 +65,7 @@ jobs:
         with:
           files: |
             dist/*.pkg
+            dist/*.dmg
+            dist/*.rb
             dist/*.sha256
           generate_release_notes: true

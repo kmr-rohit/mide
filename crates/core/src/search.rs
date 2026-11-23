@@ -54,7 +54,7 @@ impl Matcher {
     }
 
     /// Non-empty matches within one line, as char ranges relative to the line.
-    fn line_matches(&self, line: &str) -> Vec<Range<usize>> {
+    pub fn line_matches(&self, line: &str) -> Vec<Range<usize>> {
         let ascii = line.is_ascii();
         self.re
             .find_iter(line)

@@ -30,10 +30,11 @@ use crate::trust;
 use crate::palette::{Choice, Command, Item, Palette, PaletteEvent};
 use crate::terminal_view::{TerminalEvent, TerminalView};
 use crate::recent;
+use crate::search_view::{SearchEvent, SearchView};
 
 actions!(
     workspace,
-    [Save, SaveAs, NewFile, CloseTab, NextTab, PrevTab, Quit, ToggleGit, OpenFolder, QuickOpen, CommandPalette, ToggleTerminal, NewTerminal, ToggleSidebar, CloseFolder, ToggleTheme, GotoLine]
+    [Save, SaveAs, NewFile, FindInFiles, CloseTab, NextTab, PrevTab, Quit, ToggleGit, OpenFolder, QuickOpen, CommandPalette, ToggleTerminal, NewTerminal, ToggleSidebar, CloseFolder, ToggleTheme, GotoLine]
 );
 
 /// Payload for dragging the terminal panel by its header to another dock.
@@ -133,6 +134,7 @@ pub struct Workspace {
     /// Folder waiting for the "discard unsaved changes?" answer.
     pending_open: Option<PathBuf>,
     palette: Option<Entity<Palette>>,
+    search: Option<Entity<SearchView>>,
     palette_prev_focus: Option<FocusHandle>,
     tabs: Vec<Entity<EditorView>>,
     active: usize,
@@ -174,6 +176,7 @@ impl Workspace {
             pending_term_close: None,
             pending_open: None,
             palette: None,
+            search: None,
             palette_prev_focus: None,
             tabs: Vec::new(),
             active: 0,
@@ -1609,6 +1612,47 @@ impl Workspace {
 
     fn close_palette(&mut self, _restore: bool) {
         self.palette = None;
+        self.search = None;
+    }
+
+    /// ⇧⌘F: search every file in the project.
+    fn find_in_files(&mut self, _: &FindInFiles, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(root) = self.root.clone() else {
+            return self.flash("Open a folder first (⌘O)", cx);
+        };
+        if self.search.is_some() {
+            self.close_palette(true);
+            self.refocus_after_palette(window, cx);
+            return cx.notify();
+        }
+        self.close_palette(false);
+        let seed = self
+            .active_editor()
+            .map(|e| e.read(cx).buffer.selected_text())
+            .filter(|s| !s.is_empty() && !s.contains('\n'))
+            .unwrap_or_default();
+        let view = cx.new(|cx| SearchView::new(root, &seed, cx));
+        cx.subscribe_in(&view, window, |ws, _, ev: &SearchEvent, window, cx| match ev {
+            SearchEvent::Dismissed => {
+                ws.close_palette(true);
+                ws.refocus_after_palette(window, cx);
+                cx.notify();
+            }
+            SearchEvent::Open { path, line, col } => {
+                let (path, line, col) = (path.clone(), *line, *col);
+                ws.close_palette(false);
+                ws.open_file(&path, window, cx);
+                if let Some(ed) = ws.active_editor().cloned() {
+                    ed.update(cx, |ed, cx| ed.goto(line + 1, col + 1, cx));
+                }
+                cx.notify();
+            }
+        })
+        .detach();
+        self.palette_prev_focus = window.focused(cx);
+        window.focus(&view.read(cx).focus_handle(cx));
+        self.search = Some(view);
+        cx.notify();
     }
 
     fn refocus_after_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -1631,6 +1675,7 @@ impl Workspace {
             cmd("Edit: Go to Line…", "⌃G", Command::GotoLine),
             cmd("File: New File", "⌘N", Command::NewFile),
             cmd("File: Save", "⌘S", Command::Save),
+            cmd("Find: In Files…", "⇧⌘F", Command::FindInFiles),
             cmd("File: Save As…", "⇧⌘S", Command::SaveAs),
             cmd("File: Reload from Disk", "", Command::ReloadFromDisk),
             cmd("File: Close Tab", "⌘W", Command::CloseTab),
@@ -1696,6 +1741,7 @@ impl Workspace {
                 Command::QuickOpen => self.open_palette(PaletteKind::Files, window, cx),
                 Command::GotoLine if self.active_editor().is_some() => self.open_palette(PaletteKind::GotoLine, window, cx),
                 Command::GotoLine => {}
+                Command::FindInFiles => self.find_in_files(&FindInFiles, window, cx),
                 Command::NewFile => self.new_file(&NewFile, window, cx),
                 Command::Save => self.save(&Save, window, cx),
                 Command::SaveAs => self.save_as(&SaveAs, window, cx),
@@ -2213,6 +2259,7 @@ impl Render for Workspace {
             .track_focus(&self.focus_handle)
             .on_action(cx.listener(Self::save))
             .on_action(cx.listener(Self::save_as))
+            .on_action(cx.listener(Self::find_in_files))
             .on_action(cx.listener(Self::new_file))
             .on_action(cx.listener(Self::close_active))
             .on_action(cx.listener(Self::next_tab))
@@ -2264,6 +2311,25 @@ impl Render for Workspace {
             )
             .when(dragging_panel, |d| d.child(self.render_drop_zones(cx)))
             .children(self.render_ctx_menu(cx))
+            .children(self.search.clone().map(|search| {
+                div()
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .size_full()
+                    .flex()
+                    .justify_center()
+                    .occlude()
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, _, window, cx| {
+                            this.close_palette(true);
+                            this.refocus_after_palette(window, cx);
+                            cx.notify();
+                        }),
+                    )
+                    .child(div().child(search))
+            }))
             .children(self.palette.clone().map(|palette| {
                 // Full-window backdrop: clicking outside the palette dismisses it.
                 div()

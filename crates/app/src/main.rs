@@ -10,6 +10,7 @@ mod layout;
 mod palette;
 mod perf;
 mod recent;
+mod search_view;
 mod session;
 mod terminal_view;
 mod theme;
@@ -136,6 +137,7 @@ fn set_menus(cx: &mut App) {
                 MenuItem::os_action("Select All", SelectAll, OsAction::SelectAll),
                 MenuItem::separator(),
                 MenuItem::action("Find…", Find),
+                MenuItem::action("Find in Files…", FindInFiles),
                 MenuItem::action("Find Next", FindNext),
                 MenuItem::action("Find Previous", FindPrev),
                 MenuItem::action("Replace…", FindReplace),
@@ -235,6 +237,7 @@ fn bind_keys(cx: &mut App) {
         KeyBinding::new("cmd-d", AddNextOccurrence, ed),
         KeyBinding::new("ctrl-cmd-g", SelectAllOccurrences, ed),
         KeyBinding::new("cmd-s", Save, None),
+        KeyBinding::new("cmd-shift-f", FindInFiles, None),
         KeyBinding::new("cmd-shift-s", SaveAs, None),
         KeyBinding::new("cmd-n", NewFile, None),
         KeyBinding::new("cmd-w", CloseTab, None),

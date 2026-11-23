@@ -23,6 +23,7 @@ pub enum Command {
     QuickOpen,
     GotoLine,
     NewFile,
+    FindInFiles,
     Save,
     SaveAs,
     ReloadFromDisk,

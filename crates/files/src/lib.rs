@@ -1,7 +1,10 @@
 //! File-system layer: the sidebar tree model, the flat file list for Cmd+P, and
 //! a debounced watcher. No UI code here.
 
+mod search;
 mod watch;
+
+pub use search::{search, Hit, Summary};
 
 use std::collections::{HashMap, HashSet};
 use std::io;

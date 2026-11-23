@@ -3373,6 +3373,7 @@ name = "mide-files"
 version = "0.1.0"
 dependencies = [
  "ignore",
+ "mide-core",
  "notify",
  "tempfile",
 ]

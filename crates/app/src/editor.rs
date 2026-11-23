@@ -16,6 +16,7 @@ use gpui::{
     UnderlineStyle, Window,
 };
 use mide_core::search::{self, Matcher, Query};
+use mide_git::fileinfo::{self, BlameLine, Change, ChangeKind};
 use mide_core::{Buffer, Motion, Selection};
 use mide_syntax::{DocHighlighter, Rgb, Span, Syntaxes, Theme};
 
@@ -217,6 +218,12 @@ pub struct EditorView {
     selecting: bool,
     /// Dragging the scrollbar thumb: where inside the thumb it was grabbed (px).
     scroll_drag: Option<f32>,
+    /// Git: the repository folder, the file as staged, how the buffer differs from it, and blame.
+    repo_root: Option<PathBuf>,
+    git_base: Option<Arc<String>>,
+    pub changes: Arc<Vec<Change>>,
+    changes_gen: u64,
+    blame: Option<Arc<Vec<BlameLine>>>,
     reveal_cursor: bool,
     find_bar: Option<Entity<FindBar>>,
     /// The last query, kept so ⌘G works after the bar is closed.
@@ -260,6 +267,11 @@ impl EditorView {
             marked: None,
             selecting: false,
             scroll_drag: None,
+            repo_root: None,
+            git_base: None,
+            changes: Arc::new(Vec::new()),
+            changes_gen: 0,
+            blame: None,
             reveal_cursor: false,
             find_bar: None,
             find_query: Query::default(),
@@ -432,6 +444,122 @@ impl EditorView {
         self.scroll_y = scroll_y.max(0.0);
     }
 
+    // ---- git: change markers, hunks, blame ----------------------------------------------
+
+    /// Tell the editor which repository it lives in and (re)read its git state.
+    pub fn set_repo(&mut self, root: Option<PathBuf>, cx: &mut Context<Self>) {
+        self.repo_root = root;
+        self.refresh_git_info(cx);
+    }
+
+    /// Re-read the staged version of the file and its blame in the background.
+    pub fn refresh_git_info(&mut self, cx: &mut Context<Self>) {
+        let (Some(root), Some(path)) = (self.repo_root.clone(), self.path.clone()) else { return };
+        if !self.show_gutter {
+            return;
+        }
+        cx.spawn(async move |this, cx| {
+            let (base, blame) = cx
+                .background_executor()
+                .spawn(async move {
+                    let base = fileinfo::index_text(&root, &path).map(|t| t.replace("\r\n", "\n"));
+                    let blame = base.as_ref().and_then(|_| fileinfo::blame(&root, &path).ok());
+                    (base, blame)
+                })
+                .await;
+            let _ = this.update(cx, |ed, cx| {
+                ed.git_base = base.map(Arc::new);
+                ed.blame = blame.map(Arc::new);
+                ed.recompute_changes(cx, std::time::Duration::ZERO);
+            });
+        })
+        .detach();
+    }
+
+    /// Diff the buffer against the staged text (after `delay`, so typing does not diff every key).
+    fn recompute_changes(&mut self, cx: &mut Context<Self>, delay: std::time::Duration) {
+        const MAX_CHARS: usize = 2_000_000;
+        let Some(base) = self.git_base.clone() else {
+            if !self.changes.is_empty() {
+                self.changes = Arc::new(Vec::new());
+                cx.notify();
+            }
+            return;
+        };
+        if self.buffer.len_chars() > MAX_CHARS || base.len() > MAX_CHARS {
+            return;
+        }
+        self.changes_gen += 1;
+        let generation = self.changes_gen;
+        cx.spawn(async move |this, cx| {
+            if !delay.is_zero() {
+                cx.background_executor().timer(delay).await;
+            }
+            // Snapshot the text on the UI thread (cheap), diff it elsewhere.
+            let Ok(Some(text)) = this.update(cx, |ed, _| (ed.changes_gen == generation).then(|| ed.buffer.text())) else {
+                return;
+            };
+            let changes = cx.background_executor().spawn(async move { fileinfo::diff_lines(&base, &text) }).await;
+            let _ = this.update(cx, |ed, cx| {
+                if ed.changes_gen == generation && *ed.changes != changes {
+                    ed.changes = Arc::new(changes);
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
+
+    /// The change under the caret, with the staged text it differs from.
+    pub fn change_at_caret(&self) -> Option<(Change, Arc<String>)> {
+        let head = self.buffer.selections().last()?.head;
+        let line = self.buffer.line_col(head).0;
+        let c = self.changes.iter().find(|c| c.contains_line(line))?;
+        Some((c.clone(), self.git_base.clone()?))
+    }
+
+    /// Put the staged text of `c` back into the buffer (undoable).
+    pub fn revert_change(&mut self, c: &Change, cx: &mut Context<Self>) {
+        let Some(base) = self.git_base.clone() else { return };
+        let old = fileinfo::old_text(&base, c);
+        let a = self.buffer.line_start(c.new.start);
+        let b = self.buffer.line_start(c.new.end);
+        self.buffer.set_selections(vec![Selection::new(a, b)]);
+        self.edit(|buf| if old.is_empty() { buf.delete_selection() } else { buf.insert(&old) }, cx);
+        self.buffer.set_cursor(a);
+    }
+
+    /// Jump the caret to the next (or previous) changed line.
+    pub fn goto_change(&mut self, forward: bool, cx: &mut Context<Self>) {
+        let head = self.buffer.selections().last().map_or(0, |s| s.head);
+        let line = self.buffer.line_col(head).0;
+        let target = if forward {
+            self.changes.iter().map(|c| c.new.start).find(|&s| s > line)
+        } else {
+            self.changes.iter().rev().map(|c| c.new.start).find(|&s| s < line)
+        };
+        if let Some(l) = target {
+            let at = self.buffer.line_start(l.min(self.buffer.len_lines().saturating_sub(1)));
+            self.buffer.set_cursor(at);
+            self.touched(cx);
+        }
+    }
+
+    /// "Author, 3 days ago: summary" for the caret line, when the file is saved and committed.
+    pub fn blame_text(&self) -> Option<String> {
+        if self.buffer.is_dirty() {
+            return None;
+        }
+        let head = self.buffer.selections().last()?.head;
+        let line = self.buffer.line_col(head).0;
+        let b = self.blame.as_ref()?.get(line)?;
+        if !b.committed {
+            return Some("Not committed yet".to_owned());
+        }
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64);
+        Some(format!("{}, {}: {}", b.author, fileinfo::ago(now, b.time), b.summary))
+    }
+
     // ---- change bookkeeping --------------------------------------------------
 
     fn after_edit(&mut self, cx: &mut Context<Self>) {
@@ -439,6 +567,8 @@ impl EditorView {
         self.highlighter.invalidate_from(line);
         let _ = self.line_spans.split_off(&line);
         self.approx_spans.clear();
+        self.blame = None; // line numbers moved; blame returns after the next save
+        self.recompute_changes(cx, std::time::Duration::from_millis(200));
         if self.find_bar.is_some() {
             self.recompute_find(false, cx); // the matches moved with the text
         }
@@ -1174,6 +1304,8 @@ struct Frame {
     rows: Vec<Row>,
     numbers: Vec<ShapedLine>,
     current_lines: Vec<usize>,
+    /// Changed lines in view, for the gutter: (line, kind).
+    marks: Vec<(usize, ChangeKind)>,
     /// Find matches in view: (line, start col, end col).
     matches: Vec<(usize, usize, usize)>,
     focused: bool,
@@ -1322,6 +1454,18 @@ impl gpui::Element for EditorElement {
                 }).collect(),
             });
 
+            let marks: Vec<(usize, ChangeKind)> = if ed.show_gutter {
+                ed.changes
+                    .iter()
+                    .filter(|c| c.new.end >= first_line && c.new.start <= first_line + count)
+                    .flat_map(|c| {
+                        let kind = c.kind();
+                        if kind == ChangeKind::Deleted { vec![(c.new.start, kind)] } else { c.new.clone().map(|l| (l, kind)).collect() }
+                    })
+                    .collect()
+            } else {
+                Vec::new()
+            };
             // Find matches intersecting the visible lines.
             let (lo, hi) = (ed.buffer.line_start(first_line), ed.buffer.line_start(first_line + count));
             let a = ed.find_matches.partition_point(|r| r.end <= lo);
@@ -1344,6 +1488,7 @@ impl gpui::Element for EditorElement {
                 rows,
                 numbers,
                 current_lines,
+                marks,
                 matches,
                 focused,
             }
@@ -1484,6 +1629,18 @@ impl gpui::Element for EditorElement {
                 ));
             }
             let _ = num.paint(point(x, y_of(line)), lh, window, cx);
+        }
+        // Change markers on the gutter's left edge: green added, blue modified, red deleted.
+        for (line, kind) in &frame.marks {
+            let (color, w, h, dy) = match kind {
+                ChangeKind::Added => (0x2ea043, 3.0, lh, px(0.)),
+                ChangeKind::Modified => (0x3b82f6, 3.0, lh, px(0.)),
+                ChangeKind::Deleted => (0xf85149, 7.0, px(2.), px(-1.)),
+            };
+            window.paint_quad(fill(
+                Bounds::new(point(bounds.left() + px(1.), y_of(*line) + dy), size(px(w), h)),
+                hsla(Rgb::hex(color)),
+            ));
         }
 
         perf::note_paint(started, self.editor.read(cx).last_input);

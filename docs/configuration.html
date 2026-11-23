@@ -36,7 +36,7 @@
   </div>
 </header>
 <main id="main">
-<div class="wrap page"><aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><ul><li><a href="#where-settings-live">Where settings live</a></li><li><a href="#config-toml">config.toml</a></li><li><a href="#layout-toml">layout.toml</a></li><li><a href="#themes">Themes</a></li><li><a href="#environment-variables">Environment variables</a></li></ul></aside><article class="prose"><h1>Configuration</h1>
+<div class="wrap page"><aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><ul><li><a href="#where-settings-live">Where settings live</a></li><li><a href="#config-toml">config.toml</a></li><li><a href="#keymap-toml">keymap.toml</a></li><li><a href="#layout-toml">layout.toml</a></li><li><a href="#themes">Themes</a></li><li><a href="#environment-variables">Environment variables</a></li></ul></aside><article class="prose"><h1>Configuration</h1>
 <p class="lead">Plain TOML files. Save one and mide reloads it.</p>
 
 <h2 id="where-settings-live">Where settings live</h2>
@@ -87,6 +87,7 @@ open_terminals = ["Shell", "Claude"]</code></pre>
 <div class="table-wrap"><table>
 <thead><tr><th scope="col">Key</th><th scope="col">Default</th><th scope="col">Meaning</th></tr></thead>
 <tbody>
+<tr><td><code>restore_session</code></td><td><code>true</code></td><td>Reopen last time's files and caret positions, and recover unsaved text after a crash.</td></tr>
 <tr><td><code>keep_open_on_switch</code></td><td><code>false</code></td><td>When you open another folder, keep the open files and terminal sessions instead of closing them.</td></tr>
 </tbody></table></div>
 
@@ -115,6 +116,17 @@ open_terminals = ["Shell", "Claude"]</code></pre>
 <tbody>
 <tr><td><code>open_terminals</code></td><td>Profile names to start when a folder opens. Only starts sessions if none are running, so switching folders never piles up duplicates.</td></tr>
 </tbody></table></div>
+
+<h2 id="keymap-toml">keymap.toml</h2>
+<p>Run <strong>Preferences: Edit Keybindings</strong> from the command palette to create <code>~/.config/mide/keymap.toml</code> with a list of actions. Saving it reloads the bindings. Your entries win over the defaults.</p>
+<pre><code>[[bind]]
+key = "cmd-k cmd-d"          # a chord: two keystrokes in a row
+action = "editor::DuplicateLine"
+context = "Editor"           # optional
+
+[[bind]]
+key = "cmd-e"
+action = "none"              # frees a key</code></pre>
 
 <h2 id="layout-toml">layout.toml</h2>
 <p>You rarely edit this by hand, but you can.</p>

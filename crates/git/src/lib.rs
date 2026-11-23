@@ -2,6 +2,7 @@
 //! graph lanes, and commit diffs. No UI code here.
 
 pub mod diff;
+pub mod fileinfo;
 pub mod graph;
 pub mod ops;
 

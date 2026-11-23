@@ -36,7 +36,7 @@
   </div>
 </header>
 <main id="main">
-<div class="wrap page"><aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><ul><li><a href="#open-a-project">Open a project</a></li><li><a href="#go-to-anything">Go to anything</a></li><li><a href="#files-and-tabs">Files and tabs</a></li><li><a href="#editing">Editing</a></li><li><a href="#selection-and-multiple-cursors">Selection and multiple cursors</a></li><li><a href="#find-and-replace">Find and replace</a></li><li><a href="#panels-and-views">Panels and views</a></li><li><a href="#themes">Themes</a></li></ul></aside><article class="prose"><h1>Guide</h1>
+<div class="wrap page"><aside class="toc" aria-label="On this page"><p class="toc-title">On this page</p><ul><li><a href="#open-a-project">Open a project</a></li><li><a href="#go-to-anything">Go to anything</a></li><li><a href="#windows-menus-and-git-in-the-editor">Windows, menus and git in the editor</a></li><li><a href="#files-and-tabs">Files and tabs</a></li><li><a href="#editing">Editing</a></li><li><a href="#selection-and-multiple-cursors">Selection and multiple cursors</a></li><li><a href="#find-and-replace">Find and replace</a></li><li><a href="#panels-and-views">Panels and views</a></li><li><a href="#themes">Themes</a></li></ul></aside><article class="prose"><h1>Guide</h1>
 <p class="lead">Everything you need to work in mide, and every shortcut.</p>
 
 <h2 id="open-a-project">Open a project</h2>
@@ -54,6 +54,11 @@
 <tr><td class="keys"><kbd>⌘</kbd><kbd>O</kbd></td><td>Open a folder.</td></tr>
 <tr><td class="keys"><kbd>⌘</kbd><kbd>B</kbd></td><td>Show or hide the sidebar.</td></tr>
 </tbody></table></div>
+
+<h2 id="windows-menus-and-git-in-the-editor">Windows, menus and git in the editor</h2>
+<p><kbd>⇧</kbd><kbd>⌘</kbd><kbd>N</kbd> opens another window and <kbd>⌥</kbd><kbd>⌘</kbd><kbd>O</kbd> opens a folder in a new one. Right-click the editor for the actions that apply to your selection, a tab for close and path actions, and a sidebar row for file operations.</p>
+<p>Lines that differ from the staged file get a marker on the left edge of the gutter: green for added, blue for modified, red for deleted. Right-click a changed line for <strong>Stage Hunk</strong> (stages only that hunk) or <strong>Revert Hunk</strong>, and jump between changes with <kbd>⌥</kbd><kbd>⌘</kbd><kbd>↓</kbd> and <kbd>↑</kbd>. The status bar shows who last changed the line you are on.</p>
+<p><strong>Send Selection to Terminal</strong> pastes the selected text, with its file and line numbers, into the active terminal session; <strong>Send File Path</strong> pastes <code>@path</code> into a Claude or Copilot session. Nothing runs until you press Enter.</p>
 
 <h2 id="files-and-tabs">Files and tabs</h2>
 <p>New files (<kbd>⌘</kbd><kbd>N</kbd>), Save As (<kbd>⇧</kbd><kbd>⌘</kbd><kbd>S</kbd>) and a right-click menu in the sidebar (new file or folder, rename, reveal in Finder, copy path, move to Trash) are built in. If a file changes on disk while it is open, a clean tab reloads by itself; a tab with unsaved edits shows a bar asking you to reload or keep yours. mide also reopens your tabs and caret positions next time, and recovers unsaved text after a crash.</p>

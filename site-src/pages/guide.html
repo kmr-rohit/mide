@@ -19,6 +19,11 @@
 <tr><td class="keys"><kbd>⌘</kbd><kbd>B</kbd></td><td>Show or hide the sidebar.</td></tr>
 </tbody></table></div>
 
+<h2>Windows, menus and git in the editor</h2>
+<p><kbd>⇧</kbd><kbd>⌘</kbd><kbd>N</kbd> opens another window and <kbd>⌥</kbd><kbd>⌘</kbd><kbd>O</kbd> opens a folder in a new one. Right-click the editor for the actions that apply to your selection, a tab for close and path actions, and a sidebar row for file operations.</p>
+<p>Lines that differ from the staged file get a marker on the left edge of the gutter: green for added, blue for modified, red for deleted. Right-click a changed line for <strong>Stage Hunk</strong> (stages only that hunk) or <strong>Revert Hunk</strong>, and jump between changes with <kbd>⌥</kbd><kbd>⌘</kbd><kbd>↓</kbd> and <kbd>↑</kbd>. The status bar shows who last changed the line you are on.</p>
+<p><strong>Send Selection to Terminal</strong> pastes the selected text, with its file and line numbers, into the active terminal session; <strong>Send File Path</strong> pastes <code>@path</code> into a Claude or Copilot session. Nothing runs until you press Enter.</p>
+
 <h2>Files and tabs</h2>
 <p>New files (<kbd>⌘</kbd><kbd>N</kbd>), Save As (<kbd>⇧</kbd><kbd>⌘</kbd><kbd>S</kbd>) and a right-click menu in the sidebar (new file or folder, rename, reveal in Finder, copy path, move to Trash) are built in. If a file changes on disk while it is open, a clean tab reloads by itself; a tab with unsaved edits shows a bar asking you to reload or keep yours. mide also reopens your tabs and caret positions next time, and recovers unsaved text after a crash.</p>
 <div class="table-wrap"><table>

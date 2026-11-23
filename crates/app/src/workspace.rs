@@ -36,7 +36,7 @@ use crate::search_view::{SearchEvent, SearchView};
 
 actions!(
     workspace,
-    [Save, SaveAs, NewFile, FindInFiles, NewWindow, OpenFolderInNewWindow, SendSelectionToTerminal, SendPathToTerminal, CloseTab, NextTab, PrevTab, Quit, ToggleGit, OpenFolder, QuickOpen, CommandPalette, ToggleTerminal, NewTerminal, ToggleSidebar, CloseFolder, ToggleTheme, GotoLine]
+    [Save, SaveAs, NewFile, FindInFiles, NewWindow, OpenFolderInNewWindow, SendSelectionToTerminal, SendPathToTerminal, StageHunk, RevertHunk, NextChange, PrevChange, CloseTab, NextTab, PrevTab, Quit, ToggleGit, OpenFolder, QuickOpen, CommandPalette, ToggleTerminal, NewTerminal, ToggleSidebar, CloseFolder, ToggleTheme, GotoLine]
 );
 
 /// Payload for dragging the terminal panel by its header to another dock.
@@ -111,6 +111,8 @@ enum MenuAct {
     CopyText(String, &'static str),
     Reveal(PathBuf),
     OpenInNewWindow(PathBuf),
+    StageHunk,
+    RevertHunk,
 }
 
 struct Entry {
@@ -500,6 +502,9 @@ impl Workspace {
             self.check_open_files(cx);
         }
         if git {
+            if let Some(ed) = self.active_editor().cloned() {
+                ed.update(cx, |ed, cx| ed.refresh_git_info(cx));
+            }
             self.refresh_git(cx);
             if let Some(v) = &self.git_view {
                 v.update(cx, |v, cx| v.reload(cx));
@@ -736,6 +741,11 @@ impl Workspace {
         e.push(item("Move Line Down", "⌃⌘↓", d(Box::new(ed::MoveLineDown))));
         e.push(item("Join Lines", "⌘J", d(Box::new(ed::JoinLines))));
         e.push(separator());
+        if editor.read(cx).change_at_caret().is_some() {
+            e.push(item("Stage Hunk", "", MenuAct::StageHunk));
+            e.push(item("Revert Hunk", "", MenuAct::RevertHunk));
+            e.push(separator());
+        }
         if has_sel {
             e.push(item("Send Selection to Terminal", "", MenuAct::SendSelection));
         }
@@ -781,6 +791,8 @@ impl Workspace {
                 window.dispatch_action(action, cx);
             }
             MenuAct::SendSelection => self.send_selection(window, cx),
+            MenuAct::StageHunk => self.stage_hunk(cx),
+            MenuAct::RevertHunk => self.revert_hunk(cx),
             MenuAct::SendPath(p) => {
                 let rel = self.relative_to_root(&p);
                 self.send_to_terminal(rel, true, window, cx);
@@ -816,6 +828,47 @@ impl Workspace {
         if kept_dirty > 0 {
             self.flash(format!("{kept_dirty} tab{} with unsaved changes left open", plural(kept_dirty)), cx);
         }
+    }
+
+    /// Stage the changed hunk under the caret (only that hunk, not the whole file).
+    fn stage_hunk(&mut self, cx: &mut Context<Self>) {
+        let (Some(root), Some(editor)) = (self.root.clone(), self.active_editor().cloned()) else { return };
+        let (path, change, base, text) = {
+            let ed = editor.read(cx);
+            let Some((c, base)) = ed.change_at_caret() else {
+                return self.flash("No change at the caret", cx);
+            };
+            let Some(p) = ed.path.clone() else { return };
+            (p, c, base, ed.buffer.text())
+        };
+        let Ok(rel) = path.strip_prefix(&root).map(|r| r.to_string_lossy().into_owned()) else {
+            return self.flash("This file is outside the project folder", cx);
+        };
+        let patch = mide_git::fileinfo::hunk_patch(&rel, &base, &text, &change);
+        cx.spawn(async move |this, cx| {
+            let r = cx.background_executor().spawn(async move { mide_git::ops::stage_patch(&root, &patch) }).await;
+            let _ = this.update(cx, |ws, cx| {
+                match r {
+                    Ok(_) => ws.flash("Staged hunk", cx),
+                    Err(e) => ws.flash(format!("Cannot stage hunk: {e}"), cx),
+                }
+                editor.update(cx, |ed, cx| ed.refresh_git_info(cx));
+                ws.refresh_git(cx);
+                if let Some(v) = &ws.git_view {
+                    v.update(cx, |v, cx| v.reload(cx));
+                }
+            });
+        })
+        .detach();
+    }
+
+    fn revert_hunk(&mut self, cx: &mut Context<Self>) {
+        let Some(editor) = self.active_editor().cloned() else { return };
+        let Some((c, _)) = editor.read(cx).change_at_caret() else {
+            return self.flash("No change at the caret", cx);
+        };
+        editor.update(cx, |ed, cx| ed.revert_change(&c, cx));
+        self.flash("Reverted hunk (undo with ⌘Z)", cx);
     }
 
     fn relative_to_root(&self, p: &Path) -> String {
@@ -1149,6 +1202,8 @@ impl Workspace {
             EditorEvent::ContextMenu(pos) => ws.show_editor_menu(*pos, cx),
         })
         .detach();
+        let root = self.root.clone();
+        editor.update(cx, |ed, cx| ed.set_repo(root, cx));
         self.tabs.push(editor);
     }
 
@@ -1305,6 +1360,7 @@ impl Workspace {
         match result {
             Ok(name) => {
                 self.flash(format!("Saved {name}"), cx);
+                editor.update(cx, |ed, cx| ed.refresh_git_info(cx));
                 let saved_path_is_keymap = saved_path.is_some() && saved_path == crate::keymap::path();
                 let is_config = saved_path.is_some_and(|p| {
                     Some(&p) == config::global_path().as_ref()
@@ -1966,6 +2022,10 @@ impl Workspace {
             cmd("Find: In Files…", "⇧⌘F", Command::FindInFiles),
             cmd("File: New Window", "⇧⌘N", Command::NewWindow),
             cmd("File: Open Folder in New Window…", "⌥⌘O", Command::OpenFolderInNewWindow),
+            cmd("Git: Stage Hunk", "", Command::StageHunk),
+            cmd("Git: Revert Hunk", "", Command::RevertHunk),
+            cmd("Git: Next Change", "⌥⌘↓", Command::NextChange),
+            cmd("Git: Previous Change", "⌥⌘↑", Command::PrevChange),
             cmd("Terminal: Send Selection", "", Command::SendSelection),
             cmd("Terminal: Send File Path", "", Command::SendPath),
             cmd("File: Save As…", "⇧⌘S", Command::SaveAs),
@@ -2036,6 +2096,14 @@ impl Workspace {
                 Command::GotoLine if self.active_editor().is_some() => self.open_palette(PaletteKind::GotoLine, window, cx),
                 Command::GotoLine => {}
                 Command::FindInFiles => self.find_in_files(&FindInFiles, window, cx),
+                Command::StageHunk => self.stage_hunk(cx),
+                Command::RevertHunk => self.revert_hunk(cx),
+                Command::NextChange | Command::PrevChange => {
+                    let fwd = c == Command::NextChange;
+                    if let Some(ed) = self.active_editor().cloned() {
+                        ed.update(cx, |ed, cx| ed.goto_change(fwd, cx));
+                    }
+                }
                 Command::EditKeymap => self.edit_keymap(window, cx),
                 Command::ReloadKeymap => self.reload_keymap(cx),
                 Command::NewWindow => {
@@ -2515,7 +2583,10 @@ impl Workspace {
         let (line, col) = ed.caret_line_col();
         let left = match &self.message {
             Some(m) => m.to_string(),
-            None => format!("{git}, Line {line}, Column {col}"),
+            None => match ed.blame_text() {
+                Some(b) => format!("{git}, Line {line}, Column {col}      {b}"),
+                None => format!("{git}, Line {line}, Column {col}"),
+            },
         };
         let branch = self.git.as_ref().and_then(|g| g.branch.clone()).unwrap_or_default();
         (left, format!("{branch}      {}      {}", ed.buffer.indent().label(), ed.syntax_name))
@@ -2621,6 +2692,18 @@ impl Render for Workspace {
             .on_action(cx.listener(Self::save_as))
             .on_action(cx.listener(Self::find_in_files))
             .on_action(cx.listener(Self::open_folder_in_new_window))
+            .on_action(cx.listener(|this, _: &StageHunk, _, cx| this.stage_hunk(cx)))
+            .on_action(cx.listener(|this, _: &RevertHunk, _, cx| this.revert_hunk(cx)))
+            .on_action(cx.listener(|this, _: &NextChange, _, cx| {
+                if let Some(ed) = this.active_editor().cloned() {
+                    ed.update(cx, |ed, cx| ed.goto_change(true, cx));
+                }
+            }))
+            .on_action(cx.listener(|this, _: &PrevChange, _, cx| {
+                if let Some(ed) = this.active_editor().cloned() {
+                    ed.update(cx, |ed, cx| ed.goto_change(false, cx));
+                }
+            }))
             .on_action(cx.listener(|this, _: &SendSelectionToTerminal, window, cx| this.send_selection(window, cx)))
             .on_action(cx.listener(|this, _: &SendPathToTerminal, window, cx| {
                 if let Some(p) = this.active_editor().and_then(|e| e.read(cx).path.clone()) {

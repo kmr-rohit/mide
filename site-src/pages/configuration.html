@@ -51,6 +51,7 @@ open_terminals = ["Shell", "Claude"]</code></pre>
 <div class="table-wrap"><table>
 <thead><tr><th scope="col">Key</th><th scope="col">Default</th><th scope="col">Meaning</th></tr></thead>
 <tbody>
+<tr><td><code>restore_session</code></td><td><code>true</code></td><td>Reopen last time's files and caret positions, and recover unsaved text after a crash.</td></tr>
 <tr><td><code>keep_open_on_switch</code></td><td><code>false</code></td><td>When you open another folder, keep the open files and terminal sessions instead of closing them.</td></tr>
 </tbody></table></div>
 
@@ -79,6 +80,17 @@ open_terminals = ["Shell", "Claude"]</code></pre>
 <tbody>
 <tr><td><code>open_terminals</code></td><td>Profile names to start when a folder opens. Only starts sessions if none are running, so switching folders never piles up duplicates.</td></tr>
 </tbody></table></div>
+
+<h2>keymap.toml</h2>
+<p>Run <strong>Preferences: Edit Keybindings</strong> from the command palette to create <code>~/.config/mide/keymap.toml</code> with a list of actions. Saving it reloads the bindings. Your entries win over the defaults.</p>
+<pre><code>[[bind]]
+key = "cmd-k cmd-d"          # a chord: two keystrokes in a row
+action = "editor::DuplicateLine"
+context = "Editor"           # optional
+
+[[bind]]
+key = "cmd-e"
+action = "none"              # frees a key</code></pre>
 
 <h2>layout.toml</h2>
 <p>You rarely edit this by hand, but you can.</p>

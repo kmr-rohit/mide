@@ -19,6 +19,15 @@ Everyday editing:
 * Scrollbars in the editor (draggable) and the sidebar; the sidebar list is virtualized, so huge folders stay smooth.
 * Clicking the Dock icon after closing the window opens a window again.
 
+Windows, menus and git in the editor:
+
+* New Window (⇧⌘N) and Open Folder in New Window (⌥⌘O); the sidebar menu on a folder has "Open in New Window". Quit counts unsaved files in every window.
+* Right-click menus: in the editor (cut/copy/paste, find, line commands, comment, send to terminal, stage/revert hunk), on tabs (close, close others, close to the right, copy path, reveal) and in the sidebar.
+* Send Selection to Terminal (with `file:lines` and a fenced block) and Send File Path (as `@file` for Claude and Copilot sessions), pasted so nothing runs until you press Enter.
+* Tab bar scrolls sideways when full, keeps the active tab in view, truncates long names, and tabs can be dragged to reorder.
+* Keybindings file `~/.config/mide/keymap.toml` (Preferences: Edit Keybindings / Reload Keymap; saving it reloads). Chords and unbinding are supported.
+* Git gutter markers (green added, blue modified, red deleted lines versus the staged file), Stage Hunk, Revert Hunk, Next/Previous Change (⌥⌘↓/↑), and the blame of the caret line in the status bar.
+
 ## 0.1.0
 
 First public release.

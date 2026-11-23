@@ -244,6 +244,8 @@ pub(crate) fn bind_keys(cx: &mut App) {
         KeyBinding::new("cmd-d", AddNextOccurrence, ed),
         KeyBinding::new("ctrl-cmd-g", SelectAllOccurrences, ed),
         KeyBinding::new("cmd-s", Save, None),
+        KeyBinding::new("cmd-alt-down", NextChange, ed),
+        KeyBinding::new("cmd-alt-up", PrevChange, ed),
         KeyBinding::new("cmd-shift-n", NewWindow, None),
         KeyBinding::new("cmd-alt-o", OpenFolderInNewWindow, None),
         KeyBinding::new("cmd-shift-f", FindInFiles, None),

@@ -76,6 +76,11 @@ pub fn stage(root: &Path, paths: &[String]) -> OpResult {
     run(root, &with_paths(&["add"], paths), None)
 }
 
+/// Stage exactly the changes in a zero-context unified diff (one hunk of one file).
+pub fn stage_patch(root: &Path, patch: &str) -> OpResult {
+    run(root, &["apply", "--cached", "--unidiff-zero", "--whitespace=nowarn", "-"], Some(patch))
+}
+
 pub fn stage_all(root: &Path) -> OpResult {
     run(root, &["add", "-A"], None)
 }

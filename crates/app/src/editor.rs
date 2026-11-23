@@ -742,6 +742,22 @@ impl EditorView {
         self.touched(cx);
     }
 
+    fn on_right_click(&mut self, e: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.show_gutter {
+            return;
+        }
+        window.focus(&self.focus_handle);
+        // Like most editors: right-clicking outside the selection moves the caret there first.
+        if let Some(off) = self.offset_for_point(e.position) {
+            let inside = self.buffer.selections().iter().any(|s| !s.is_empty() && s.start() <= off && off <= s.end());
+            if !inside {
+                self.buffer.set_cursor(off);
+                self.touched(cx);
+            }
+        }
+        cx.emit(EditorEvent::ContextMenu(e.position));
+    }
+
     fn on_mouse_up(&mut self, _: &MouseUpEvent, _: &mut Window, _: &mut Context<Self>) {
         self.selecting = false;
         self.scroll_drag = None;
@@ -861,6 +877,14 @@ impl EditorView {
         Some((l.text_left + row.shaped.x_for_index(d), line))
     }
 }
+
+/// Things the editor asks its host window to do.
+pub enum EditorEvent {
+    /// Right-click at this window position.
+    ContextMenu(Point<Pixels>),
+}
+
+impl gpui::EventEmitter<EditorEvent> for EditorView {}
 
 impl Focusable for EditorView {
     fn focus_handle(&self, _: &App) -> FocusHandle {
@@ -1107,6 +1131,7 @@ impl Render for EditorView {
             .on_action(cx.listener(Self::cut))
             .on_action(cx.listener(Self::paste))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
+            .on_mouse_down(MouseButton::Right, cx.listener(Self::on_right_click))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))
             .on_mouse_up_out(MouseButton::Left, cx.listener(Self::on_mouse_up))
             .on_mouse_move(cx.listener(Self::on_mouse_move))

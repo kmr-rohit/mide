@@ -30,7 +30,7 @@ use palette::*;
 use workspace::*;
 
 /// Create the editor window. Returns `None` if the system refuses.
-fn open_main_window(cx: &mut App, root: Option<PathBuf>, initial: Option<PathBuf>) -> Option<gpui::WindowHandle<Workspace>> {
+pub(crate) fn open_main_window(cx: &mut App, root: Option<PathBuf>, initial: Option<PathBuf>) -> Option<gpui::WindowHandle<Workspace>> {
     let bounds = Bounds::centered(None, size(px(1200.), px(780.)), cx);
     cx.open_window(
         WindowOptions {
@@ -81,6 +81,9 @@ fn main() {
 
     app.run(move |cx: &mut App| {
         bind_keys(cx);
+        cx.on_action(|_: &NewWindow, cx| {
+            open_main_window(cx, None, None);
+        });
         set_menus(cx);
         open_main_window(cx, root.clone(), initial.clone());
         // Paths from Finder / `mide <path>`. The window may have been closed (the app keeps
@@ -120,6 +123,8 @@ fn set_menus(cx: &mut App) {
                 MenuItem::action("Go to File…", QuickOpen),
                 MenuItem::separator(),
                 MenuItem::action("New File", NewFile),
+                MenuItem::action("New Window", NewWindow),
+                MenuItem::action("Open Folder in New Window…", OpenFolderInNewWindow),
                 MenuItem::action("Save", Save),
                 MenuItem::action("Save As…", SaveAs),
                 MenuItem::action("Close Tab", CloseTab),
@@ -237,6 +242,8 @@ fn bind_keys(cx: &mut App) {
         KeyBinding::new("cmd-d", AddNextOccurrence, ed),
         KeyBinding::new("ctrl-cmd-g", SelectAllOccurrences, ed),
         KeyBinding::new("cmd-s", Save, None),
+        KeyBinding::new("cmd-shift-n", NewWindow, None),
+        KeyBinding::new("cmd-alt-o", OpenFolderInNewWindow, None),
         KeyBinding::new("cmd-shift-f", FindInFiles, None),
         KeyBinding::new("cmd-shift-s", SaveAs, None),
         KeyBinding::new("cmd-n", NewFile, None),

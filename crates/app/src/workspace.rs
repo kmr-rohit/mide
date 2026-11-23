@@ -21,7 +21,7 @@ use mide_syntax::{Syntaxes, Theme};
 
 use crate::assets::file_icon;
 use crate::config::{self, Config, Tools};
-use crate::editor::{DiskCheck, EditorView};
+use crate::editor::{DiskCheck, EditorEvent, EditorView};
 use crate::session::{SessionState, Store, TabState};
 use crate::fonts::{self, Fonts};
 use crate::git_view::{GitEvent, GitView};
@@ -36,7 +36,7 @@ use crate::search_view::{SearchEvent, SearchView};
 
 actions!(
     workspace,
-    [Save, SaveAs, NewFile, FindInFiles, CloseTab, NextTab, PrevTab, Quit, ToggleGit, OpenFolder, QuickOpen, CommandPalette, ToggleTerminal, NewTerminal, ToggleSidebar, CloseFolder, ToggleTheme, GotoLine]
+    [Save, SaveAs, NewFile, FindInFiles, NewWindow, OpenFolderInNewWindow, SendSelectionToTerminal, SendPathToTerminal, CloseTab, NextTab, PrevTab, Quit, ToggleGit, OpenFolder, QuickOpen, CommandPalette, ToggleTerminal, NewTerminal, ToggleSidebar, CloseFolder, ToggleTheme, GotoLine]
 );
 
 /// Payload for dragging the terminal panel by its header to another dock.
@@ -96,16 +96,52 @@ enum CtxAction {
     NewFolder,
     Rename,
     Trash,
-    Reveal,
-    CopyPath,
 }
 
-/// The right-click menu of a sidebar row.
+/// What a menu entry does when chosen.
+enum MenuAct {
+    Sidebar(CtxAction),
+    /// Run an editor/workspace action on the focused editor.
+    Dispatch(Box<dyn gpui::Action>),
+    SendSelection,
+    SendPath(PathBuf),
+    CloseTab(usize),
+    CloseOthers(usize),
+    CloseRight(usize),
+    CopyText(String, &'static str),
+    Reveal(PathBuf),
+    OpenInNewWindow(PathBuf),
+}
+
+struct Entry {
+    label: String,
+    hint: &'static str,
+    /// `None` is a separator line.
+    act: Option<MenuAct>,
+}
+
+fn item(label: &str, hint: &'static str, act: MenuAct) -> Entry {
+    Entry { label: label.to_owned(), hint, act: Some(act) }
+}
+
+fn separator() -> Entry {
+    Entry { label: String::new(), hint: "", act: None }
+}
+
+/// A right-click menu (sidebar row, editor or tab).
 struct CtxMenu {
     pos: Point<Pixels>,
+    /// File or folder the menu was opened on (sidebar actions).
     path: PathBuf,
     is_dir: bool,
-    is_root: bool,
+    entries: Vec<Entry>,
+}
+
+/// Payload for dragging a tab to a new position.
+#[derive(Clone)]
+struct DraggedTab {
+    ix: usize,
+    title: SharedString,
 }
 
 enum PaletteKind {
@@ -152,6 +188,7 @@ pub struct Workspace {
     pending_quit: bool,
     rows_cache: RefCell<(u64, Rc<Vec<mide_files::Row>>)>,
     sidebar_scroll: UniformListScrollHandle,
+    tabs_scroll: gpui::ScrollHandle,
     store: Option<Store>,
     ctx_menu: Option<CtxMenu>,
     pending_name: Option<NameAction>,
@@ -196,6 +233,7 @@ impl Workspace {
             pending_quit: false,
             rows_cache: RefCell::new((0, Rc::new(Vec::new()))),
             sidebar_scroll: UniformListScrollHandle::new(),
+            tabs_scroll: gpui::ScrollHandle::new(),
             store: Store::default_store(),
             ctx_menu: None,
             pending_name: None,
@@ -380,6 +418,25 @@ impl Workspace {
         self.flash("Folder closed — open files and terminal sessions are still open", cx);
         self.focus_main(window, cx);
         cx.notify();
+    }
+
+    fn open_folder_in_new_window(&mut self, _: &OpenFolderInNewWindow, window: &mut Window, cx: &mut Context<Self>) {
+        let rx = cx.prompt_for_paths(PathPromptOptions {
+            files: false,
+            directories: true,
+            multiple: false,
+            prompt: Some("Open in New Window".into()),
+        });
+        cx.spawn_in(window, async move |_, cx| {
+            if let Ok(Ok(Some(paths))) = rx.await {
+                if let Some(p) = paths.into_iter().next() {
+                    let _ = cx.update(|_, cx| {
+                        crate::open_main_window(cx, Some(p), None);
+                    });
+                }
+            }
+        })
+        .detach();
     }
 
     fn prompt_open_folder(&mut self, _: &OpenFolder, window: &mut Window, cx: &mut Context<Self>) {
@@ -618,47 +675,206 @@ impl Workspace {
 
     // ---- sidebar: context menu and file operations ----------------------------------------------
 
-    fn ctx_items(menu: &CtxMenu) -> Vec<(&'static str, CtxAction)> {
-        let mut v = Vec::new();
-        if menu.is_dir {
-            v.push(("New File…", CtxAction::NewFile));
-            v.push(("New Folder…", CtxAction::NewFolder));
+    fn show_sidebar_menu(&mut self, pos: Point<Pixels>, path: PathBuf, is_dir: bool, is_root: bool, cx: &mut Context<Self>) {
+        let mut e = Vec::new();
+        if is_dir {
+            e.push(item("New File…", "", MenuAct::Sidebar(CtxAction::NewFile)));
+            e.push(item("New Folder…", "", MenuAct::Sidebar(CtxAction::NewFolder)));
+            e.push(item("Open in New Window", "", MenuAct::OpenInNewWindow(path.clone())));
+            e.push(separator());
         }
-        if !menu.is_root {
-            v.push(("Rename…", CtxAction::Rename));
+        if !is_root {
+            e.push(item("Rename…", "", MenuAct::Sidebar(CtxAction::Rename)));
         }
-        v.push(("Reveal in Finder", CtxAction::Reveal));
-        v.push(("Copy Path", CtxAction::CopyPath));
-        if !menu.is_root {
-            v.push(("Move to Trash", CtxAction::Trash));
+        e.push(item("Reveal in Finder", "", MenuAct::Reveal(path.clone())));
+        e.push(item("Copy Path", "", MenuAct::CopyText(path.to_string_lossy().into_owned(), "Path copied")));
+        if !is_root {
+            e.push(separator());
+            e.push(item("Move to Trash", "", MenuAct::Sidebar(CtxAction::Trash)));
         }
-        v
+        self.ctx_menu = Some(CtxMenu { pos, path, is_dir, entries: e });
+        cx.notify();
     }
 
-    fn run_ctx(&mut self, action: CtxAction, window: &mut Window, cx: &mut Context<Self>) {
+    /// Right-click in the editor: what you can do with the selection and the file.
+    fn show_editor_menu(&mut self, pos: Point<Pixels>, cx: &mut Context<Self>) {
+        use crate::editor as ed;
+        let Some(editor) = self.active_editor().cloned() else { return };
+        let (has_sel, path) = {
+            let e = editor.read(cx);
+            (!e.buffer.selected_text().is_empty(), e.path.clone())
+        };
+        let d = |a: Box<dyn gpui::Action>| MenuAct::Dispatch(a);
+        let mut e = Vec::new();
+        if has_sel {
+            e.push(item("Cut", "⌘X", d(Box::new(ed::Cut))));
+            e.push(item("Copy", "⌘C", d(Box::new(ed::Copy))));
+        }
+        e.push(item("Paste", "⌘V", d(Box::new(ed::Paste))));
+        e.push(item("Select All", "⌘A", d(Box::new(ed::SelectAll))));
+        e.push(separator());
+        e.push(item("Undo", "⌘Z", d(Box::new(ed::Undo))));
+        e.push(item("Redo", "⇧⌘Z", d(Box::new(ed::Redo))));
+        e.push(separator());
+        e.push(item("Find…", "⌘F", d(Box::new(ed::Find))));
+        e.push(item("Find in Files…", "⇧⌘F", d(Box::new(FindInFiles))));
+        if has_sel {
+            e.push(item("Use Selection for Find", "⌘E", d(Box::new(ed::UseSelectionForFind))));
+            e.push(item("Add Next Occurrence", "⌘D", d(Box::new(ed::AddNextOccurrence))));
+            e.push(item("Select All Occurrences", "⌃⌘G", d(Box::new(ed::SelectAllOccurrences))));
+        }
+        e.push(separator());
+        e.push(item("Toggle Comment", "⌘/", d(Box::new(ed::ToggleComment))));
+        e.push(item("Indent", "⌘]", d(Box::new(ed::IndentLines))));
+        e.push(item("Outdent", "⌘[", d(Box::new(ed::OutdentLines))));
+        e.push(item("Duplicate Line", "⇧⌘D", d(Box::new(ed::DuplicateLine))));
+        e.push(item("Delete Line", "⌃⇧K", d(Box::new(ed::DeleteLine))));
+        e.push(item("Move Line Up", "⌃⌘↑", d(Box::new(ed::MoveLineUp))));
+        e.push(item("Move Line Down", "⌃⌘↓", d(Box::new(ed::MoveLineDown))));
+        e.push(item("Join Lines", "⌘J", d(Box::new(ed::JoinLines))));
+        e.push(separator());
+        if has_sel {
+            e.push(item("Send Selection to Terminal", "", MenuAct::SendSelection));
+        }
+        if let Some(p) = &path {
+            e.push(item("Send File Path to Terminal", "", MenuAct::SendPath(p.clone())));
+            e.push(separator());
+            e.push(item("Copy File Path", "", MenuAct::CopyText(p.to_string_lossy().into_owned(), "Path copied")));
+            e.push(item("Reveal in Finder", "", MenuAct::Reveal(p.clone())));
+        }
+        self.ctx_menu = Some(CtxMenu { pos, path: path.unwrap_or_default(), is_dir: false, entries: e });
+        cx.notify();
+    }
+
+    fn show_tab_menu(&mut self, pos: Point<Pixels>, i: usize, cx: &mut Context<Self>) {
+        let Some(t) = self.tabs.get(i) else { return };
+        let path = t.read(cx).path.clone();
+        let mut e = vec![
+            item("Close", "⌘W", MenuAct::CloseTab(i)),
+            item("Close Others", "", MenuAct::CloseOthers(i)),
+            item("Close Tabs to the Right", "", MenuAct::CloseRight(i)),
+        ];
+        if let Some(p) = path {
+            e.push(separator());
+            e.push(item("Copy Path", "", MenuAct::CopyText(p.to_string_lossy().into_owned(), "Path copied")));
+            e.push(item("Reveal in Finder", "", MenuAct::Reveal(p.clone())));
+            e.push(item("Send Path to Terminal", "", MenuAct::SendPath(p)));
+        }
+        self.ctx_menu = Some(CtxMenu { pos, path: PathBuf::new(), is_dir: false, entries: e });
+        cx.notify();
+    }
+
+    fn run_menu(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
         let Some(menu) = self.ctx_menu.take() else { return };
-        let dir = if menu.is_dir { menu.path.clone() } else { menu.path.parent().map(Path::to_owned).unwrap_or_default() };
-        match action {
-            CtxAction::NewFile => self.prompt_name(
-                NameAction::NewFile(dir),
-                "New file name (folders/ allowed)",
-                "",
-                window,
-                cx,
-            ),
-            CtxAction::NewFolder => self.prompt_name(NameAction::NewFolder(dir), "New folder name", "", window, cx),
-            CtxAction::Rename => {
-                let name = menu.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-                self.prompt_name(NameAction::Rename(menu.path), "New name", &name, window, cx);
+        let (path, is_dir) = (menu.path, menu.is_dir);
+        let Some(act) = menu.entries.into_iter().nth(ix).and_then(|e| e.act) else { return };
+        match act {
+            MenuAct::Sidebar(a) => self.run_sidebar_action(a, path, is_dir, window, cx),
+            MenuAct::Dispatch(action) => {
+                if let Some(ed) = self.active_editor() {
+                    let h = ed.read(cx).focus_handle(cx);
+                    window.focus(&h);
+                }
+                window.dispatch_action(action, cx);
             }
-            CtxAction::Reveal => cx.reveal_path(&menu.path),
-            CtxAction::CopyPath => {
-                cx.write_to_clipboard(ClipboardItem::new_string(menu.path.to_string_lossy().into_owned()));
-                self.flash("Path copied", cx);
+            MenuAct::SendSelection => self.send_selection(window, cx),
+            MenuAct::SendPath(p) => {
+                let rel = self.relative_to_root(&p);
+                self.send_to_terminal(rel, true, window, cx);
             }
-            CtxAction::Trash => self.trash(&menu.path, window, cx),
+            MenuAct::CloseTab(i) => self.close_tab(i, window, cx),
+            MenuAct::CloseOthers(i) => self.close_many(|j| j != i, window, cx),
+            MenuAct::CloseRight(i) => self.close_many(|j| j > i, window, cx),
+            MenuAct::CopyText(text, msg) => {
+                cx.write_to_clipboard(ClipboardItem::new_string(text));
+                self.flash(msg, cx);
+            }
+            MenuAct::Reveal(p) => cx.reveal_path(&p),
+            MenuAct::OpenInNewWindow(p) => {
+                crate::open_main_window(cx, Some(p), None);
+            }
         }
         cx.notify();
+    }
+
+    /// Close every tab whose index matches, except ones with unsaved changes (those stay open).
+    fn close_many(&mut self, which: impl Fn(usize) -> bool, window: &mut Window, cx: &mut Context<Self>) {
+        let mut kept_dirty = 0;
+        for i in (0..self.tabs.len()).rev() {
+            if !which(i) {
+                continue;
+            }
+            if self.tabs[i].read(cx).buffer.is_dirty() {
+                kept_dirty += 1;
+            } else {
+                self.remove_tab(i, window, cx);
+            }
+        }
+        if kept_dirty > 0 {
+            self.flash(format!("{kept_dirty} tab{} with unsaved changes left open", plural(kept_dirty)), cx);
+        }
+    }
+
+    fn relative_to_root(&self, p: &Path) -> String {
+        match self.root.as_deref().and_then(|r| p.strip_prefix(r).ok()) {
+            Some(rel) => rel.to_string_lossy().into_owned(),
+            None => p.to_string_lossy().into_owned(),
+        }
+    }
+
+    /// Type `text` into the active terminal session (pasted, so it is never executed).
+    /// `as_path` marks a file reference, written as `@path` for Claude and Copilot sessions.
+    fn send_to_terminal(&mut self, text: String, as_path: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(session) = self.terminals.get(self.active_term) else {
+            return self.flash("Open a terminal session first (⌃` or ⌘⇧T)", cx);
+        };
+        let ai = {
+            let n = session.name.to_lowercase();
+            n.contains("claude") || n.contains("copilot")
+        };
+        let payload = if as_path && ai { format!("@{text} ") } else if as_path { format!("{text} ") } else { text };
+        let view = session.view.clone();
+        view.update(cx, |v, _| v.paste_text(&payload));
+        self.show_term = true;
+        self.show_git = false;
+        let h = view.read(cx).focus_handle(cx);
+        window.focus(&h);
+        cx.notify();
+    }
+
+    /// The selection with where it came from, e.g. `src/main.rs:10-14` and a fenced block.
+    fn send_selection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(editor) = self.active_editor().cloned() else { return };
+        let (text, header) = {
+            let ed = editor.read(cx);
+            let text = ed.buffer.selected_text();
+            let sel = ed.buffer.selections().last().copied();
+            let lines = sel.map(|s| (ed.buffer.line_col(s.start()).0 + 1, ed.buffer.line_col(s.end()).0 + 1));
+            let name = ed.path.as_ref().map(|p| self.relative_to_root(p)).unwrap_or_else(|| ed.title());
+            let header = match lines {
+                Some((a, b)) if a != b => format!("{name}:{a}-{b}"),
+                Some((a, _)) => format!("{name}:{a}"),
+                None => name,
+            };
+            (text, header)
+        };
+        if text.is_empty() {
+            return self.flash("Select some text first", cx);
+        }
+        self.send_to_terminal(format!("{header}\n```\n{text}\n```\n"), false, window, cx);
+    }
+
+    fn run_sidebar_action(&mut self, action: CtxAction, path: PathBuf, is_dir: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let dir = if is_dir { path.clone() } else { path.parent().map(Path::to_owned).unwrap_or_default() };
+        match action {
+            CtxAction::NewFile => self.prompt_name(NameAction::NewFile(dir), "New file name (folders/ allowed)", "", window, cx),
+            CtxAction::NewFolder => self.prompt_name(NameAction::NewFolder(dir), "New folder name", "", window, cx),
+            CtxAction::Rename => {
+                let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                self.prompt_name(NameAction::Rename(path), "New name", &name, window, cx);
+            }
+            CtxAction::Trash => self.trash(&path, window, cx),
+        }
     }
 
     fn prompt_name(&mut self, action: NameAction, placeholder: &str, initial: &str, window: &mut Window, cx: &mut Context<Self>) {
@@ -802,10 +1018,37 @@ impl Workspace {
         }
     }
 
-    fn render_ctx_menu(&self, cx: &mut Context<Self>) -> Option<gpui::Div> {
+    fn render_ctx_menu(&self, viewport: gpui::Size<Pixels>, cx: &mut Context<Self>) -> Option<gpui::Div> {
         let menu = self.ctx_menu.as_ref()?;
-        let items = Self::ctx_items(menu);
-        let pos = menu.pos;
+        // Keep the menu on screen: flip up/left when it would run off the window.
+        let height: f32 = menu.entries.iter().map(|e| if e.act.is_some() { 24.0 } else { 9.0 }).sum::<f32>() + 8.0;
+        let width = 240.0;
+        let x = f32::from(menu.pos.x).min(f32::from(viewport.width) - width - 4.0).max(4.0);
+        let y = f32::from(menu.pos.y).min(f32::from(viewport.height) - height - 4.0).max(4.0);
+        let rows = menu
+            .entries
+            .iter()
+            .enumerate()
+            .map(|(i, e)| {
+                if e.act.is_none() {
+                    return div().h(px(9.)).flex().items_center().child(div().h(px(1.)).w_full().mx(px(8.)).bg(rgb(ui().pal_border))).into_any_element();
+                }
+                div()
+                    .id(("ctx", i))
+                    .h(px(24.))
+                    .px(px(12.))
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap(px(16.))
+                    .cursor_pointer()
+                    .hover(|h| h.bg(rgb(ui().pal_selected)))
+                    .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| this.run_menu(i, window, cx)))
+                    .child(e.label.clone())
+                    .child(div().text_size(px(11.)).text_color(rgb(ui().pal_muted)).child(e.hint))
+                    .into_any_element()
+            })
+            .collect::<Vec<_>>();
         Some(
             div()
                 .absolute()
@@ -813,26 +1056,20 @@ impl Workspace {
                 .left_0()
                 .size_full()
                 .occlude()
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(|this, _, _, cx| {
-                        this.ctx_menu = None;
-                        cx.notify();
-                    }),
-                )
-                .on_mouse_down(
-                    MouseButton::Right,
-                    cx.listener(|this, _, _, cx| {
-                        this.ctx_menu = None;
-                        cx.notify();
-                    }),
-                )
+                .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
+                    this.ctx_menu = None;
+                    cx.notify();
+                }))
+                .on_mouse_down(MouseButton::Right, cx.listener(|this, _, _, cx| {
+                    this.ctx_menu = None;
+                    cx.notify();
+                }))
                 .child(
                     div()
                         .absolute()
-                        .left(pos.x)
-                        .top(pos.y)
-                        .w(px(180.))
+                        .left(px(x))
+                        .top(px(y))
+                        .w(px(width))
                         .py(px(4.))
                         .rounded(px(6.))
                         .border_1()
@@ -841,20 +1078,7 @@ impl Workspace {
                         .text_color(rgb(ui().pal_text))
                         .text_size(px(12.))
                         .shadow_lg()
-                        .children(items.into_iter().enumerate().map(|(i, (label, action))| {
-                            div()
-                                .id(("ctx", i))
-                                .h(px(24.))
-                                .px(px(12.))
-                                .flex()
-                                .items_center()
-                                .cursor_pointer()
-                                .hover(|h| h.bg(rgb(ui().pal_selected)))
-                                .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
-                                    this.run_ctx(action, window, cx)
-                                }))
-                                .child(label)
-                        })),
+                        .children(rows),
                 ),
         )
     }
@@ -906,8 +1130,7 @@ impl Workspace {
         let (syntaxes, theme) = (self.syntaxes.clone(), self.theme.clone());
         let p = path.clone();
         let editor = cx.new(|cx| EditorView::new(buffer, Some(p), syntaxes, theme, cx));
-        cx.observe(&editor, |_, _, cx| cx.notify()).detach();
-        self.tabs.push(editor);
+        self.add_tab(editor, window, cx);
         if let Some(t) = self.tree.as_mut() {
             let _ = t.reveal(&path);
         }
@@ -917,11 +1140,35 @@ impl Workspace {
         self.activate(self.tabs.len() - 1, window, cx);
     }
 
+    fn add_tab(&mut self, editor: Entity<EditorView>, window: &mut Window, cx: &mut Context<Self>) {
+        cx.observe(&editor, |_, _, cx| cx.notify()).detach();
+        cx.subscribe_in(&editor, window, |ws, _, ev: &EditorEvent, _, cx| match ev {
+            EditorEvent::ContextMenu(pos) => ws.show_editor_menu(*pos, cx),
+        })
+        .detach();
+        self.tabs.push(editor);
+    }
+
+    /// Move a tab (drag and drop) so it ends up at index `to`; the active tab stays active.
+    fn move_tab(&mut self, from: usize, to: usize, cx: &mut Context<Self>) {
+        if from >= self.tabs.len() || to >= self.tabs.len() || from == to {
+            return;
+        }
+        let active_id = self.tabs.get(self.active).map(|t| t.entity_id());
+        let t = self.tabs.remove(from);
+        self.tabs.insert(to, t);
+        if let Some(id) = active_id {
+            self.active = self.tabs.iter().position(|t| t.entity_id() == id).unwrap_or(0);
+        }
+        cx.notify();
+    }
+
     fn activate(&mut self, i: usize, window: &mut Window, cx: &mut Context<Self>) {
         if i >= self.tabs.len() {
             return;
         }
         self.active = i;
+        self.tabs_scroll.scroll_to_item(i);
         self.pending_discard = None;
         let handle = self.tabs[i].read(cx).focus_handle(cx);
         window.focus(&handle);
@@ -986,8 +1233,7 @@ impl Workspace {
     fn new_file(&mut self, _: &NewFile, window: &mut Window, cx: &mut Context<Self>) {
         let (syntaxes, theme) = (self.syntaxes.clone(), self.theme.clone());
         let editor = cx.new(|cx| EditorView::new(Buffer::default(), None, syntaxes, theme, cx));
-        cx.observe(&editor, |_, _, cx| cx.notify()).detach();
-        self.tabs.push(editor);
+        self.add_tab(editor, window, cx);
         self.activate(self.tabs.len() - 1, window, cx);
     }
 
@@ -1685,6 +1931,10 @@ impl Workspace {
             cmd("File: New File", "⌘N", Command::NewFile),
             cmd("File: Save", "⌘S", Command::Save),
             cmd("Find: In Files…", "⇧⌘F", Command::FindInFiles),
+            cmd("File: New Window", "⇧⌘N", Command::NewWindow),
+            cmd("File: Open Folder in New Window…", "⌥⌘O", Command::OpenFolderInNewWindow),
+            cmd("Terminal: Send Selection", "", Command::SendSelection),
+            cmd("Terminal: Send File Path", "", Command::SendPath),
             cmd("File: Save As…", "⇧⌘S", Command::SaveAs),
             cmd("File: Reload from Disk", "", Command::ReloadFromDisk),
             cmd("File: Close Tab", "⌘W", Command::CloseTab),
@@ -1751,6 +2001,17 @@ impl Workspace {
                 Command::GotoLine if self.active_editor().is_some() => self.open_palette(PaletteKind::GotoLine, window, cx),
                 Command::GotoLine => {}
                 Command::FindInFiles => self.find_in_files(&FindInFiles, window, cx),
+                Command::NewWindow => {
+                    crate::open_main_window(cx, None, None);
+                }
+                Command::OpenFolderInNewWindow => self.open_folder_in_new_window(&OpenFolderInNewWindow, window, cx),
+                Command::SendSelection => self.send_selection(window, cx),
+                Command::SendPath => {
+                    if let Some(p) = self.active_editor().and_then(|e| e.read(cx).path.clone()) {
+                        let rel = self.relative_to_root(&p);
+                        self.send_to_terminal(rel, true, window, cx);
+                    }
+                }
                 Command::NewFile => self.new_file(&NewFile, window, cx),
                 Command::Save => self.save(&Save, window, cx),
                 Command::SaveAs => self.save_as(&SaveAs, window, cx),
@@ -1791,7 +2052,15 @@ impl Workspace {
     }
 
     fn quit(&mut self, _: &Quit, _: &mut Window, cx: &mut Context<Self>) {
-        let dirty = self.tabs.iter().filter(|t| t.read(cx).buffer.is_dirty()).count();
+        let mut dirty = self.tabs.iter().filter(|t| t.read(cx).buffer.is_dirty()).count();
+        // Other windows count too (this window is being updated, so reading it fails and is skipped).
+        for h in cx.windows() {
+            if let Some(other) = h.downcast::<Workspace>() {
+                if let Ok(n) = other.read_with(cx, |ws, cx| ws.tabs.iter().filter(|t| t.read(cx).buffer.is_dirty()).count()) {
+                    dirty += n;
+                }
+            }
+        }
         if dirty > 0 && !self.pending_quit {
             self.pending_quit = true;
             self.flash(format!("{dirty} unsaved file(s): press ⌘Q again to quit and discard changes"), cx);
@@ -1863,8 +2132,7 @@ impl Workspace {
             .on_mouse_down(
                 MouseButton::Right,
                 cx.listener(move |this, e: &MouseDownEvent, _, cx| {
-                    this.ctx_menu = Some(CtxMenu { pos: e.position, path: ctx_path.clone(), is_dir, is_root: i == 0 });
-                    cx.notify();
+                    this.show_sidebar_menu(e.position, ctx_path.clone(), is_dir, i == 0, cx);
                 }),
             )
             .child(div().w(px(12.)).h(px(12.)).flex_none().when_some(arrow, |d, a| {
@@ -1932,53 +2200,71 @@ impl Workspace {
     }
 
     fn render_tabs(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        div()
-            .h(px(25.))
-            .flex_none()
-            .flex()
-            .items_end()
-            .bg(rgb(ui().tabbar_bg))
-            .text_size(px(12.))
-            .children(self.tabs.iter().enumerate().map(|(i, t)| {
-                let ed = t.read(cx);
-                let active = i == self.active;
-                let dirty = ed.buffer.is_dirty();
-                let fg = if active { ui().tab_active_text } else { ui().tab_inactive_text };
-                div()
-                    .id(("tab", i))
-                    .group("tab")
-                    .h(px(23.))
-                    .pl(px(12.))
-                    .pr(px(6.))
-                    .flex()
-                    .items_center()
-                    .gap(px(6.))
-                    .when(active, |d| d.bg(rgb(ui().tab_active_bg)).italic())
-                    .text_color(rgb(fg))
-                    .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| this.activate(i, window, cx)))
-                    .child(ed.title())
-                    .child(
-                        // Close button: always on the active tab, on hover for the others.
-                        // A dirty tab shows ● until hovered, like Sublime.
-                        div()
-                            .id(("tab-close", i))
-                            .w(px(14.))
-                            .h(px(14.))
-                            .flex_none()
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .rounded(px(3.))
-                            .text_size(px(12.))
-                            .when(!active && !dirty, |d| d.invisible().group_hover("tab", |g| g.visible()))
-                            .hover(|h| h.bg(rgb(ui().tab_close_hover_bg)).text_color(rgb(ui().tab_close_hover_text)))
-                            .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
-                                cx.stop_propagation();
-                                this.close_tab(i, window, cx)
-                            }))
-                            .child(if dirty { "●" } else { "×" }),
-                    )
-            }))
+        let tabs = self.tabs.iter().enumerate().map(|(i, t)| {
+            let ed = t.read(cx);
+            let active = i == self.active;
+            let dirty = ed.buffer.is_dirty();
+            let fg = if active { ui().tab_active_text } else { ui().tab_inactive_text };
+            let title: SharedString = ed.title().into();
+            let drag = DraggedTab { ix: i, title: title.clone() };
+            div()
+                .id(("tab", i))
+                .group("tab")
+                .h(px(23.))
+                .flex_none()
+                .max_w(px(220.))
+                .pl(px(12.))
+                .pr(px(6.))
+                .flex()
+                .items_center()
+                .gap(px(6.))
+                .when(active, |d| d.bg(rgb(ui().tab_active_bg)).italic())
+                .text_color(rgb(fg))
+                .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| this.activate(i, window, cx)))
+                .on_mouse_down(
+                    MouseButton::Right,
+                    cx.listener(move |this, e: &MouseDownEvent, _, cx| this.show_tab_menu(e.position, i, cx)),
+                )
+                .on_drag(drag, |d, _, _, cx| {
+                    let title = d.title.clone();
+                    cx.new(|_| DragGhost(title))
+                })
+                .drag_over::<DraggedTab>(|s, _, _, _| s.bg(rgb(ui().tab_close_hover_bg)))
+                .on_drop(cx.listener(move |this, d: &DraggedTab, _, cx| this.move_tab(d.ix, i, cx)))
+                .child(div().min_w_0().overflow_hidden().whitespace_nowrap().child(title))
+                .child(
+                    // Close button: always on the active tab, on hover for the others.
+                    // A dirty tab shows ● until hovered, like Sublime.
+                    div()
+                        .id(("tab-close", i))
+                        .w(px(14.))
+                        .h(px(14.))
+                        .flex_none()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .rounded(px(3.))
+                        .text_size(px(12.))
+                        .when(!active && !dirty, |d| d.invisible().group_hover("tab", |g| g.visible()))
+                        .hover(|h| h.bg(rgb(ui().tab_close_hover_bg)).text_color(rgb(ui().tab_close_hover_text)))
+                        .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                            cx.stop_propagation();
+                            this.close_tab(i, window, cx)
+                        }))
+                        .child(if dirty { "●" } else { "×" }),
+                )
+        });
+        // Many tabs scroll sideways (and the active one is kept in view) instead of clipping.
+        div().h(px(25.)).flex_none().bg(rgb(ui().tabbar_bg)).text_size(px(12.)).child(
+            div()
+                .id("tabs")
+                .size_full()
+                .flex()
+                .items_end()
+                .overflow_x_scroll()
+                .track_scroll(&self.tabs_scroll)
+                .children(tabs),
+        )
     }
 
     fn render_terminal_pane(&self, cx: &mut Context<Self>) -> gpui::Div {
@@ -2297,6 +2583,14 @@ impl Render for Workspace {
             .on_action(cx.listener(Self::save))
             .on_action(cx.listener(Self::save_as))
             .on_action(cx.listener(Self::find_in_files))
+            .on_action(cx.listener(Self::open_folder_in_new_window))
+            .on_action(cx.listener(|this, _: &SendSelectionToTerminal, window, cx| this.send_selection(window, cx)))
+            .on_action(cx.listener(|this, _: &SendPathToTerminal, window, cx| {
+                if let Some(p) = this.active_editor().and_then(|e| e.read(cx).path.clone()) {
+                    let rel = this.relative_to_root(&p);
+                    this.send_to_terminal(rel, true, window, cx);
+                }
+            }))
             .on_action(cx.listener(Self::new_file))
             .on_action(cx.listener(Self::close_active))
             .on_action(cx.listener(Self::next_tab))
@@ -2347,7 +2641,7 @@ impl Render for Workspace {
                     .child(right),
             )
             .when(dragging_panel, |d| d.child(self.render_drop_zones(cx)))
-            .children(self.render_ctx_menu(cx))
+            .children(self.render_ctx_menu(window.viewport_size(), cx))
             .children(self.search.clone().map(|search| {
                 div()
                     .absolute()

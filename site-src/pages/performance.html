@@ -18,7 +18,6 @@
 <h2>The engine, benchmark by benchmark</h2>
 <p>{{count_benchmarks}} benchmarks on a file of {{fixture_lines}} lines ({{fixture_mb}} MB), 100,000 file paths and a 20,000-file project tree. The bar shows how much of the budget the median used; a red bar means over budget.</p>
 {{bench_table}}
-<p class="legend">Two full-file searches run slightly over their 250 ms budget on this 35 MB file. They are listed rather than hidden.</p>
 
 <h2>What got faster by measuring</h2>
 <p>Benchmarks are only worth having if they find things. These were found, and fixed, along the way:</p>
@@ -29,14 +28,16 @@
 <tr><td>Start to first editor paint</td><td class="num">334 ms</td><td class="num">about 165 ms</td><td>Check for one font instead of listing every installed font, twice.</td></tr>
 <tr><td>Idle CPU with a terminal open</td><td class="num">about 8%</td><td class="num">under 1%</td><td>Wake on terminal output instead of polling every 12 ms.</td></tr>
 <tr><td>Closing a session whose program ignores hang-up</td><td class="num">froze the app</td><td class="num">instant</td><td>Wait for the process on another thread, with a forced stop after 1.5 s.</td></tr>
-<tr><td>Full-file search allocations</td><td class="num">293 ms</td><td class="num">about 270 ms</td><td>Search lines in place instead of copying each one.</td></tr>
+<tr><td>Find a match near the end of a 1,000,000-line file</td><td class="num">269 ms</td><td class="num">under 1 ms</td><td>Search big blocks of text in one pass, across all cores, instead of one line at a time.</td></tr>
+<tr><td>Typing in the Find bar on that file (highlight and jump)</td><td class="num">537 ms</td><td class="num">1.6 ms</td><td>The same scan, and files over 4 million characters are searched off the UI thread.</td></tr>
+<tr><td>Select every occurrence</td><td class="num">746 ms</td><td class="num">102 ms</td><td>Check word boundaries on the text instead of one rope lookup per match.</td></tr>
 </tbody></table></div>
 
 <h2>Known limits</h2>
 <ul>
   <li>One very long line is slow: a 3 MB minified file costs about 47 ms per keystroke, because the whole line is laid out each frame.</li>
   <li>After a jump far into a big file, colors can be slightly off until you scroll through it, if a block comment opened further up.</li>
-  <li>Find runs on every keystroke; on a 35 MB file that is about a quarter of a second.</li>
+  <li>Find runs on every keystroke; on a 35 MB file that is about 2 ms, using all cores. A pattern that matches across a line break falls back to a slower line-by-line scan.</li>
   <li>Start-up includes about 130 ms of window and GPU setup that happens before mide's own code runs.</li>
   <li>Numbers come from one Apple Silicon Mac. Run the suite on yours.</li>
 </ul>

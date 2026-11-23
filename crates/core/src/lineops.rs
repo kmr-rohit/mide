@@ -362,14 +362,23 @@ impl Buffer {
     // ---- multi-cursor ------------------------------------------------------------------
 
     /// Char ranges of every exact (case-sensitive) occurrence of `needle`.
-    fn occurrences(&self, needle: &str) -> Vec<Range<usize>> {
+    fn occurrences(&self, needle: &str, whole_word: bool) -> Vec<Range<usize>> {
         if needle.is_empty() {
             return Vec::new();
         }
         let hay = self.rope.to_string();
         let width = needle.chars().count();
         let (mut chars, mut last_byte, mut out) = (0usize, 0usize, Vec::new());
+        let is_word = |c: char| crate::char_class(c) == crate::CharClass::Word;
         for (byte, _) in hay.match_indices(needle) {
+            if whole_word {
+                // Judge the neighbours on the text itself; a rope lookup per hit is far slower.
+                let before = hay[..byte].chars().next_back();
+                let after = hay[byte + needle.len()..].chars().next();
+                if before.is_some_and(is_word) || after.is_some_and(is_word) {
+                    continue;
+                }
+            }
             chars += hay[last_byte..byte].chars().count();
             last_byte = byte;
             out.push(chars..chars + width);
@@ -394,7 +403,7 @@ impl Buffer {
         }
         let primary = *self.selections.last().expect("never empty");
         let needle = self.slice(primary.start(), primary.end());
-        let all = self.occurrences(&needle);
+        let all = self.occurrences(&needle, false);
         let taken = |r: &Range<usize>| self.selections.iter().any(|s| s.start() < r.end && r.start < s.end());
         let next = all
             .iter()
@@ -411,12 +420,8 @@ impl Buffer {
         let primary = *self.selections.last().expect("never empty");
         let (a, b) = if primary.is_empty() { self.word_range(primary.head) } else { (primary.start(), primary.end()) };
         let needle = self.slice(a, b);
-        let mut all = self.occurrences(&needle);
-        if primary.is_empty() {
-            // Started from a bare cursor: match the whole word, not text inside longer words.
-            let is_word = |i: usize| crate::char_class(self.rope.char(i)) == crate::CharClass::Word;
-            all.retain(|r| (r.start == 0 || !is_word(r.start - 1)) && (r.end >= self.len_chars() || !is_word(r.end)));
-        }
+        // Started from a bare cursor: match the whole word, not text inside longer words.
+        let all = self.occurrences(&needle, primary.is_empty());
         if all.is_empty() {
             return;
         }

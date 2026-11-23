@@ -44,6 +44,8 @@ actions!(
 
 /// Most matches highlighted at once; keeps searching responsive in huge files.
 const MAX_MATCHES: usize = 10_000;
+/// Buffers up to this many chars are searched on the UI thread (a few ms at most); bigger ones in the background.
+const SYNC_FIND_CHARS: usize = 4_000_000;
 /// Background for every find match (the current one is also selected).
 const FIND_MATCH_BG: u32 = 0x6b5a2a;
 
@@ -233,6 +235,8 @@ pub struct EditorView {
     find_matches: Vec<Range<usize>>,
     /// Where the caret was when the bar opened; typing searches onward from here.
     find_origin: usize,
+    /// Bumped for every search; a background search whose number is stale is dropped.
+    find_gen: u64,
     /// Set when an input arrives; cleared at the end of the paint it causes.
     last_input: Option<Instant>,
 }
@@ -278,6 +282,7 @@ impl EditorView {
             find_matcher: None,
             find_matches: Vec::new(),
             find_origin: 0,
+            find_gen: 0,
             last_input: None,
         }
     }
@@ -618,6 +623,7 @@ impl EditorView {
     /// Re-run the search for the current query. With `jump`, select the first match at
     /// or after where the bar was opened (so typing homes in on the nearest result).
     fn recompute_find(&mut self, jump: bool, cx: &mut Context<Self>) {
+        self.find_gen += 1;
         match Matcher::new(&self.find_query) {
             Err(msg) => {
                 self.find_matcher = None;
@@ -628,6 +634,35 @@ impl EditorView {
                 self.find_matcher = None;
                 self.find_matches.clear();
                 self.set_find_status(String::new(), false, cx);
+            }
+            Ok(Some(m)) if self.buffer.len_chars() > SYNC_FIND_CHARS => {
+                // Search a snapshot of the rope (O(1) clone) off the UI thread; typing stays smooth.
+                self.find_matches.clear();
+                self.find_matcher = Some(m.clone());
+                self.set_find_status("Searching…".into(), false, cx);
+                let (rope, origin, generation) = (self.buffer.rope().clone(), self.find_origin, self.find_gen);
+                cx.spawn(async move |this, cx| {
+                    let (matches, first) = cx
+                        .background_executor()
+                        .spawn(async move {
+                            let all = search::find_all_in(&rope, &m, MAX_MATCHES);
+                            let first = if jump { search::find_next_in(&rope, &m, origin, true) } else { None };
+                            (all, first)
+                        })
+                        .await;
+                    let _ = this.update(cx, |ed, cx| {
+                        if ed.find_gen != generation {
+                            return; // the query or the text changed meanwhile; a newer search owns the result
+                        }
+                        ed.find_matches = matches;
+                        if let Some(r) = first {
+                            ed.select_range(r, cx);
+                        }
+                        ed.update_find_status(cx);
+                        cx.notify();
+                    });
+                })
+                .detach();
             }
             Ok(Some(m)) => {
                 self.find_matches = search::find_all(&self.buffer, &m, MAX_MATCHES);
@@ -673,6 +708,7 @@ impl EditorView {
     }
 
     fn close_find(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.find_gen += 1;
         self.find_bar = None;
         self.find_matches.clear();
         self.find_matcher = None;

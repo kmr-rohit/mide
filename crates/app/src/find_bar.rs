@@ -5,7 +5,7 @@
 
 use gpui::{
     div, prelude::*, px, rgb, App, ClickEvent, Context, CursorStyle, EventEmitter, FocusHandle, Focusable,
-    FontWeight, IntoElement, KeyDownEvent, MouseButton, Render, Window,
+    ClipboardItem, FontWeight, IntoElement, KeyDownEvent, MouseButton, Render, Window, svg,
 };
 use mide_core::search::Query;
 
@@ -147,10 +147,26 @@ impl FindBar {
                         }
                     }
                 }
+                "c" | "x" => {
+                    // Copy / cut the selection; with nothing selected, copy the whole field.
+                    let cut = key == "x";
+                    let field = self.field_mut();
+                    let text = field.selected_text().unwrap_or_else(|| field.text().to_owned());
+                    if !text.is_empty() {
+                        let was_selected = field.selection().is_some();
+                        cx.write_to_clipboard(ClipboardItem::new_string(text));
+                        if cut && was_selected {
+                            let was = self.active;
+                            if self.field_mut().delete_selection() && was == Field::Find {
+                                cx.emit(FindEvent::QueryChanged);
+                            }
+                        }
+                    }
+                }
                 "g" if m.shift => cx.emit(FindEvent::Prev),
                 "g" => cx.emit(FindEvent::Next),
                 "f" => self.focus_find_field(cx),
-                "left" | "right" | "backspace" | "delete" => handled = self.edit_key(key, e, cx),
+                "a" | "left" | "right" | "backspace" | "delete" => handled = self.edit_key(key, e, cx),
                 "enter" => cx.emit(FindEvent::ReplaceAll),
                 _ => handled = false,
             }
@@ -178,7 +194,7 @@ impl FindBar {
     /// Text editing keys go to whichever field is active.
     fn edit_key(&mut self, key: &str, e: &KeyDownEvent, cx: &mut Context<Self>) -> bool {
         let m = &e.keystroke.modifiers;
-        let mods = Mods { alt: m.alt, cmd: m.platform, ctrl: m.control };
+        let mods = Mods { alt: m.alt, cmd: m.platform, ctrl: m.control, shift: m.shift };
         let was = self.active;
         match self.field_mut().key(key, e.keystroke.key_char.as_deref(), mods) {
             Outcome::Ignored => false,
@@ -196,7 +212,7 @@ impl FindBar {
         let u = ui();
         let input = if field == Field::Find { &self.find } else { &self.replace };
         let active = self.active == field;
-        let (before, after) = input.split();
+        let (before, picked, after, caret_last) = input.segments();
         let mut row = div()
             .id(id)
             .h(px(24.))
@@ -225,9 +241,16 @@ impl FindBar {
             }
             row.child(div().text_color(rgb(u.pal_placeholder)).child(placeholder.to_owned()))
         } else {
+            let caret = || div().w(px(1.5)).h(px(15.)).flex_none().bg(rgb(u.pal_text));
             row = row.child(before.to_owned());
-            if active {
-                row = row.child(div().w(px(1.5)).h(px(15.)).flex_none().bg(rgb(u.pal_text)));
+            if active && !caret_last {
+                row = row.child(caret());
+            }
+            if !picked.is_empty() {
+                row = row.child(div().flex_none().bg(rgb(u.term_selection)).child(picked.to_owned()));
+            }
+            if active && caret_last {
+                row = row.child(caret());
             }
             row.child(after.to_owned())
         }
@@ -251,6 +274,29 @@ impl FindBar {
             .when(!on, |d| d.text_color(rgb(u.pal_muted)).hover(|h| h.bg(rgb(u.pal_hover))))
             .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| this.toggle(which, cx)))
             .child(label)
+    }
+
+    /// The chevron at the left of the Find row that shows or hides the Replace row.
+    fn replace_toggle(&self, cx: &mut Context<Self>) -> gpui::Stateful<gpui::Div> {
+        let u = ui();
+        let icon = if self.show_replace { "icons/chevron-down.svg" } else { "icons/chevron-right.svg" };
+        div()
+            .id("toggle-replace")
+            .w(px(18.))
+            .h(px(24.))
+            .flex()
+            .flex_none()
+            .items_center()
+            .justify_center()
+            .rounded(px(4.))
+            .cursor_pointer()
+            .hover(|h| h.bg(rgb(u.pal_hover)))
+            .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                let show = !this.show_replace;
+                this.show_replace(show, show, cx);
+                window.focus(&this.focus_handle);
+            }))
+            .child(svg().path(icon).size(px(12.)).text_color(rgb(u.pal_muted)))
     }
 
     fn icon_button(&self, id: &'static str, label: &'static str, event: FindEvent, cx: &mut Context<Self>) -> gpui::Stateful<gpui::Div> {
@@ -320,6 +366,7 @@ impl Render for FindBar {
                     .flex()
                     .items_center()
                     .gap(px(3.))
+                    .child(self.replace_toggle(cx))
                     .child(self.input_box("find-input", Field::Find, "Find", cx))
                     .child(self.toggle_button("opt-case", "Aa", self.case_sensitive, 0, cx))
                     .child(self.toggle_button("opt-word", "ab", self.whole_word, 1, cx))

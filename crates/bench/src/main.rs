@@ -191,6 +191,23 @@ fn search_benchmarks(rep: &mut Report, big: &std::path::Path) {
     let (m, p) = measure(5, || search::find_next(&b, &lit, b.len_chars() / 2, true));
     rep.record("search: find next (wraps, rare term)", m, p, 250.0);
 
+    // The question people actually ask: Find for something that only occurs at the very end of a
+    // huge file, cursor at the top. `recompute_find` does exactly these two steps per keystroke.
+    let last_fn = (b.len_lines().saturating_sub(8) / 8) * 8; // the last `fn function_N` line
+    let tail = q(&format!("function_{last_fn}("), false);
+    let (m, p) = measure(5, || search::find_next(&b, &tail, 0, true));
+    rep.record("search: find next, match at the end (cursor at top)", m, p, 250.0);
+
+    let (m, p) = measure(5, || {
+        let hits = search::find_all(&b, &tail, 10_000);
+        let first = search::find_next(&b, &tail, 0, true);
+        (hits, first)
+    });
+    rep.record("search: type in Find bar, match at the end (highlight + jump)", m, p, 400.0);
+
+    let (m, p) = measure(5, || search::find_prev(&b, &tail, 0, true));
+    rep.record("search: find previous from top, match at the end (wraps)", m, p, 250.0);
+
     let mut b2 = Buffer::open(big).unwrap();
     let many = q("let y", false);
     let (m, _) = measure(1, || search::replace_all(&mut b2, &many, "let z"));

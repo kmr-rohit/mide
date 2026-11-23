@@ -148,7 +148,14 @@ pub struct GitView {
     behind: usize,
     lanes: usize,
     selected: usize,
+    /// The rows as built from the selection.
     detail: Vec<DetailRow>,
+    /// What the list shows: `detail`, with long diff lines wrapped when `wrap` is on.
+    shown: Vec<DetailRow>,
+    /// Wrap long diff lines onto extra rows (toggle in the toolbar).
+    wrap: bool,
+    /// Characters that fit in one half of the diff at the current window width.
+    wrap_cols: usize,
     collapsed: HashSet<&'static str>,
     commits_scroll: UniformListScrollHandle,
     detail_scroll: UniformListScrollHandle,
@@ -202,6 +209,9 @@ impl GitView {
             lanes: 1,
             selected: 0,
             detail: Vec::new(),
+            shown: Vec::new(),
+            wrap: true,
+            wrap_cols: 0,
             collapsed: ["TAGS", "STASHES", "SUBMODULES", "WORKTREES"].into_iter().collect(),
             commits_scroll: UniformListScrollHandle::new(),
             detail_scroll: UniformListScrollHandle::new(),
@@ -292,10 +302,26 @@ impl GitView {
         self.selected.checked_sub(wt).and_then(|i| self.log.get(i)).map(|e| e.commit.id)
     }
 
+    /// Rebuild `shown` from `detail` for the current wrap setting and width.
+    fn rewrap(&mut self) {
+        self.shown = if self.wrap && self.wrap_cols > 8 {
+            wrap_detail(&self.detail, self.wrap_cols)
+        } else {
+            self.detail.clone()
+        };
+    }
+
+    fn toggle_wrap(&mut self, cx: &mut Context<Self>) {
+        self.wrap = !self.wrap;
+        self.rewrap();
+        cx.notify();
+    }
+
     fn select(&mut self, ix: usize, scroll: bool, cx: &mut Context<Self>) {
         let len = self.list_len();
         self.selected = if len == 0 { 0 } else { ix.min(len - 1) };
         self.detail = self.build_detail();
+        self.rewrap();
         self.detail_scroll.scroll_to_item(0, ScrollStrategy::Top);
         if scroll && len > 0 {
             self.commits_scroll.scroll_to_item(self.selected, ScrollStrategy::Center);
@@ -693,6 +719,7 @@ impl GitView {
             .child(self.tool_button("tb-stash", "Stash", false, cx, |this, _, cx| this.do_stash(cx)))
             .child(self.tool_button("tb-pop", "Pop Stash", false, cx, |this, _, cx| this.do_stash_pop(cx)))
             .child(div().flex_1())
+            .child(self.tool_button("tb-wrap", if self.wrap { "Wrap: on" } else { "Wrap: off" }, false, cx, |this, _, cx| this.toggle_wrap(cx)))
             .when_some(self.busy.clone(), |d, label| {
                 d.child(div().text_size(px(12.)).italic().text_color(rgb(ui().muted)).child(format!("{label}…")))
             })
@@ -1178,6 +1205,82 @@ fn stat_pill(text: String, bg: u32) -> gpui::Div {
     div().px(px(4.)).rounded(px(3.)).text_size(px(10.)).bg(rgb(bg)).text_color(rgb(ui().text)).child(text)
 }
 
+/// Gutter (line number) width inside one diff half, matching `diff_half`.
+const DIFF_GUTTER: f32 = 44.0;
+/// Width of a monospace character at the diff's font size, as a fraction of the size (slightly
+/// generous, so a wrapped line never runs under the edge).
+const DIFF_CHAR_RATIO: f32 = 0.62;
+const DIFF_FONT_SIZE: f32 = 11.5;
+
+/// Characters that fit in one half of a side-by-side diff `detail_w` pixels wide.
+fn diff_cols(detail_w: f32) -> usize {
+    let half = (detail_w - 1.0) / 2.0 - DIFF_GUTTER - 6.0;
+    (half / (DIFF_FONT_SIZE * DIFF_CHAR_RATIO)).floor().max(0.0) as usize
+}
+
+/// Expand tabs to 4 spaces, remapping the changed range to the new character positions.
+fn expand_cell(cell: &Cell) -> Cell {
+    let mut text = String::new();
+    let mut map = Vec::with_capacity(cell.text.chars().count() + 1);
+    for ch in cell.text.chars() {
+        map.push(text.chars().count());
+        if ch == '\t' {
+            text.push_str("    ");
+        } else {
+            text.push(ch);
+        }
+    }
+    map.push(text.chars().count());
+    let changed = cell.changed.as_ref().map(|r| {
+        let at = |i: usize| map.get(i).copied().unwrap_or(*map.last().unwrap_or(&0));
+        at(r.start)..at(r.end)
+    });
+    Cell { lineno: cell.lineno, text, kind: cell.kind, changed }
+}
+
+/// Split one side into pieces of at most `cols` characters. Only the first piece carries the
+/// line number; each piece keeps the part of the highlighted range that falls inside it.
+fn wrap_cell(cell: &Cell, cols: usize) -> Vec<Cell> {
+    let cell = expand_cell(cell);
+    let chars: Vec<char> = cell.text.chars().collect();
+    if chars.len() <= cols {
+        return vec![cell];
+    }
+    chars
+        .chunks(cols)
+        .enumerate()
+        .map(|(k, chunk)| {
+            let (lo, hi) = (k * cols, k * cols + chunk.len());
+            let changed = cell.changed.as_ref().and_then(|r| {
+                let (a, b) = (r.start.max(lo), r.end.min(hi));
+                (a < b).then(|| a - lo..b - lo)
+            });
+            Cell { lineno: if k == 0 { cell.lineno } else { 0 }, text: chunk.iter().collect(), kind: cell.kind, changed }
+        })
+        .collect()
+}
+
+/// A side-by-side row as one or more rows no wider than `cols` characters per side.
+fn wrap_diff_row(row: &SideBySideRow, cols: usize) -> Vec<SideBySideRow> {
+    let left = row.left.as_ref().map(|c| wrap_cell(c, cols)).unwrap_or_default();
+    let right = row.right.as_ref().map(|c| wrap_cell(c, cols)).unwrap_or_default();
+    let n = left.len().max(right.len()).max(1);
+    (0..n)
+        .map(|i| SideBySideRow { left: left.get(i).cloned(), right: right.get(i).cloned() })
+        .collect()
+}
+
+fn wrap_detail(rows: &[DetailRow], cols: usize) -> Vec<DetailRow> {
+    let mut out = Vec::with_capacity(rows.len());
+    for r in rows {
+        match r {
+            DetailRow::Diff(d) => out.extend(wrap_diff_row(d, cols).into_iter().map(DetailRow::Diff)),
+            other => out.push(other.clone()),
+        }
+    }
+    out
+}
+
 fn expand_tabs(s: &str) -> String {
     s.replace('\t', "    ")
 }
@@ -1281,7 +1384,14 @@ fn graph_cell(row: GraphRow, lanes: usize) -> impl IntoElement {
 }
 
 impl Render for GitView {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // How many characters fit in one half of the diff, from the window and column widths.
+        let detail_w = f32::from(window.viewport_size().width) - self.locations_w - self.commits_w - 10.0;
+        let cols = diff_cols(detail_w);
+        if cols != self.wrap_cols {
+            self.wrap_cols = cols;
+            self.rewrap();
+        }
         let root = div()
             .id("git-view")
             .key_context("GitView")
@@ -1327,11 +1437,11 @@ impl Render for GitView {
 
         let detail = uniform_list(
             "detail",
-            self.detail.len(),
+            self.shown.len(),
             cx.processor(|this, range: std::ops::Range<usize>, _, cx| {
                 range
                     .map(|ix| {
-                        let row = this.detail[ix].clone();
+                        let row = this.shown[ix].clone();
                         this.render_detail_row(&row, ix, cx)
                     })
                     .collect::<Vec<_>>()
@@ -1408,6 +1518,48 @@ impl Render for GitView {
 mod tests {
     use super::*;
     use mide_git::diff::{DiffLine, Hunk};
+
+    fn cell(n: u32, text: &str, kind: LineKind, changed: Option<std::ops::Range<usize>>) -> Cell {
+        Cell { lineno: n, text: text.to_owned(), kind, changed }
+    }
+
+    #[test]
+    fn short_lines_are_not_wrapped() {
+        let r = SideBySideRow { left: Some(cell(1, "abc", LineKind::Context, None)), right: Some(cell(1, "abc", LineKind::Context, None)) };
+        assert_eq!(wrap_diff_row(&r, 10).len(), 1);
+    }
+
+    #[test]
+    fn long_lines_wrap_with_number_only_on_the_first_piece_and_highlight_split() {
+        let r = SideBySideRow {
+            left: Some(cell(7, "0123456789ABCDEF", LineKind::Removed, Some(8..14))),
+            right: Some(cell(7, "short", LineKind::Added, None)),
+        };
+        let rows = wrap_diff_row(&r, 10);
+        assert_eq!(rows.len(), 2);
+        let l: Vec<_> = rows.iter().map(|r| r.left.clone().unwrap()).collect();
+        assert_eq!((l[0].lineno, l[0].text.as_str(), l[0].changed.clone()), (7, "0123456789", Some(8..10)));
+        assert_eq!((l[1].lineno, l[1].text.as_str(), l[1].changed.clone()), (0, "ABCDEF", Some(0..4)));
+        // The shorter side has nothing on the continuation row.
+        assert!(rows[0].right.is_some() && rows[1].right.is_none());
+    }
+
+    #[test]
+    fn tabs_expand_before_wrapping_and_keep_highlights_aligned() {
+        let c = expand_cell(&cell(1, "\tab", LineKind::Added, Some(1..3)));
+        assert_eq!(c.text, "    ab");
+        assert_eq!(c.changed, Some(4..6));
+    }
+
+    #[test]
+    fn unpaired_side_stays_empty_and_cols_follow_width() {
+        let r = SideBySideRow { left: None, right: Some(cell(1, &"x".repeat(25), LineKind::Added, None)) };
+        let rows = wrap_diff_row(&r, 10);
+        assert_eq!(rows.len(), 3);
+        assert!(rows.iter().all(|r| r.left.is_none()));
+        assert!(diff_cols(1200.0) > diff_cols(800.0));
+        assert_eq!(diff_cols(10.0), 0);
+    }
 
     fn file(lines: Vec<DiffLine>, binary: bool, status: FileStatus) -> FileDiff {
         FileDiff {

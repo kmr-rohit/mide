@@ -26,6 +26,7 @@ Windows, menus and git in the editor:
 * Send Selection to Terminal (with `file:lines` and a fenced block) and Send File Path (as `@file` for Claude and Copilot sessions), pasted so nothing runs until you press Enter.
 * Tab bar scrolls sideways when full, keeps the active tab in view, truncates long names, and tabs can be dragged to reorder.
 * Keybindings file `~/.config/mide/keymap.toml` (Preferences: Edit Keybindings / Reload Keymap; saving it reloads). Chords and unbinding are supported.
+* Git diff view wraps long lines onto extra rows (toolbar toggle "Wrap: on/off"), following the window and column widths.
 * Git gutter markers (green added, blue modified, red deleted lines versus the staged file), Stage Hunk, Revert Hunk, Next/Previous Change (⌥⌘↓/↑), and the blame of the caret line in the status bar.
 
 ## 0.1.0

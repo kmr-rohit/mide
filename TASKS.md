@@ -22,8 +22,7 @@ Distribution
 - [x] Homebrew cask generator `scripts/cask.sh`, output syntax-checked. Added to the release workflow.
 - [ ] Create the `homebrew-mide` tap repo and publish `Casks/mide.rb` (owner: me; steps in `docs/notes/RELEASING.md`).
       Test with `brew install --cask` on a clean Mac after the first release that includes `mide.rb`.
-- [ ] Verify the release workflow end to end by tagging the next version (owner: me). The DMG and cask steps in
-      `.github/workflows/release.yml` have not run in CI yet.
+- [x] Release workflow verified end to end with v0.3.0: the DMG and cask steps ran and their files are on the release.
 
 Show it
 - [x] Screenshots of the editor, language servers, git, terminal and palette are on the site and in the README (taken from mide on its own source; the git one has the committer email painted out).
@@ -64,7 +63,9 @@ Announce
 
 ## Housekeeping
 
-- [~] Release 0.3.0 (unsigned): version bumped and tagged; check the DMG, the cask and the install script against the real release page. A signed and notarized release follows once the Apple secrets exist.
+- [x] Released 0.3.0 (unsigned) on 2026-11-24. Verified against the real release: the install one-liner picks the DMG, the checksum matches, the app is 0.3.0 and universal (arm64 + x86_64), and `mide.rb` is attached. A signed and notarized release follows once the Apple secrets exist.
+- [ ] Publish the Homebrew cask: create the `homebrew-mide` repo and copy `mide.rb` from the release to `Casks/mide.rb`.
+- [ ] Post the release announcement (X and LinkedIn).
 - [ ] Run the Find bar changes through a manual pass on a real file with the bar open and a big file open
       (done once for the happy path; edit-while-searching on a 1M-line file not yet tried).
 - [ ] Add the new "match at the end" benchmarks to `docs/notes/PERFORMANCE.md` if it lists benchmarks by name.
